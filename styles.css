@@ -101,7 +101,11 @@ ol.songs li{border-bottom:1px solid var(--line)}
 footer{margin-top:36px;color:var(--muted);font-size:13px;display:grid;gap:4px}
 
 /* song page */
-.back{display:inline-flex;gap:6px;align-items:center;font-size:14px;margin-bottom:12px;text-decoration:none;font-weight:700}
+.back{display:inline-flex;align-items:center;gap:10px;font:700 16px/1 var(--body);min-height:50px;padding:12px 24px 12px 18px;margin-bottom:20px;border:2px solid var(--fg);border-radius:999px;background:var(--surface);color:var(--fg);text-decoration:none;transition:background-color .25s ease,border-color .25s ease,color .25s ease,transform .25s cubic-bezier(.2,.8,.2,1),box-shadow .25s ease}
+.back .arr{display:inline-block;font-size:22px;line-height:1;transition:transform .3s cubic-bezier(.2,.8,.2,1)}
+.back:hover{background:var(--red);border-color:var(--red);color:#fff;transform:translateY(-2px);box-shadow:0 10px 24px rgba(200,16,46,.32)}
+.back:hover .arr{transform:translateX(-6px)}
+.back:active{transform:translateY(0) scale(.96);box-shadow:none}
 .songhead{display:grid;gap:10px;margin-bottom:8px;padding-bottom:18px;border-bottom:2px solid var(--fg)}
 .songhead h1{font-size:clamp(40px,6vw,80px)}
 .facts{display:flex;flex-wrap:wrap;gap:8px}
@@ -188,4 +192,30 @@ table.band th{font:700 11px var(--mono);letter-spacing:.06em;text-transform:uppe
   .trk{grid-template-columns:minmax(0,1fr) auto;row-gap:8px}
   .trk input[type=range]{grid-column:1}
 }
+/* ---------- bigger tap targets and hover motion ---------- */
+.btn,.chip,.play,.seg button,.ms button,.row,.linkbtn,.who a{transition:background-color .2s ease,border-color .2s ease,color .2s ease,transform .2s cubic-bezier(.2,.8,.2,1),box-shadow .2s ease}
+.btn{min-height:48px;padding:12px 22px}
+.btn:hover:not(:disabled){transform:translateY(-2px);box-shadow:0 8px 20px rgba(200,16,46,.28)}
+.btn.quiet:hover:not(:disabled),.btn.danger:hover:not(:disabled){box-shadow:0 8px 20px rgba(0,0,0,.12)}
+.btn:active:not(:disabled){transform:scale(.96);box-shadow:none}
+.chip{padding:12px 18px;font-size:14px}
+.chip:hover{transform:translateY(-2px);border-color:var(--red);color:var(--red-ink)}
+.chip[aria-pressed="true"]:hover{color:#fff}
+.chip:active{transform:scale(.95)}
+.row{padding:16px 10px;margin-inline:-6px}
+.row .name{transition:color .2s ease,transform .25s cubic-bezier(.2,.8,.2,1);display:inline-block}
+.row:hover .name{transform:translateX(4px)}
+.row:active{transform:scale(.99)}
+.play{width:64px;height:64px}
+.play:hover:not(:disabled){transform:scale(1.08)}
+.play:active:not(:disabled){transform:scale(.94)}
+.seg button{padding:11px 16px;min-height:42px}
+.seg button:hover:not([aria-pressed="true"]){background:rgba(255,255,255,.15)}
+.ms button{width:44px;height:44px}
+.ms button:hover{transform:translateY(-2px);border-color:var(--fg)}
+.linkbtn{display:inline-flex;align-items:center;min-height:44px;padding:0 6px}
+.linkbtn:hover{color:var(--red)}
+.who a{display:inline-flex;align-items:center;min-height:44px;padding:0 6px}
+.who a:hover{transform:translateY(-2px)}
+.top .linkbtn:hover{color:#fff;opacity:.8}
 @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
