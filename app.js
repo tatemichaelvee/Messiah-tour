@@ -72,6 +72,7 @@
     var parts = h.split("/");
     if (parts[0] === "song" && parts[1]) return { view: "song", id: decodeURIComponent(parts[1]) };
     if (parts[0] === "band") return { view: "band" };
+    if (parts[0] === "upload") return { view: "upload" };
     return { view: "list" };
   }
   window.addEventListener("hashchange", function () { S.editing = false; render(); window.scrollTo(0, 0); });
@@ -83,6 +84,7 @@
     var r = route();
     if (r.view === "song") return renderSong(r.id);
     if (r.view === "band" && isAdmin()) return renderBand();
+    if (r.view === "upload" && isAdmin()) return renderBulk();
     return renderList();
   }
 
@@ -130,7 +132,7 @@
     return '<header class="top' + (full ? '' : ' compact') + '">' +
       '<div class="topline"><div class="eyebrow">' + EYEBROW + '</div>' +
       '<div class="who"><span>' + esc(S.member.name || S.session.user.email) + '</span>' +
-      (isAdmin() ? '<a href="#/band">Band list</a>' : '') +
+      (isAdmin() ? '<a href="#/band">Band list</a><a href="#/upload">Bulk upload</a>' : '') +
       '<button class="linkbtn" id="signout">Sign out</button></div></div>' +
       (full ? '<div class="hero">' + poster("hero-poster") + '<div class="hero-text">' +
       '<h1>' + TITLE + '</h1>' +
@@ -531,6 +533,71 @@
         renderBand(d.error ? d.error.message : "Removed " + b.dataset.remove + ".", d.error ? "err" : "ok");
       };
     });
+  }
+
+  // ---------- admin: bulk upload ----------
+  // Pick many files at once; each is matched to a song by its file name
+  // ("Bako rangu.m4a" -> Bako, "Declaration.m4a" -> My Declaration).
+  function norm(x) { return String(x || "").toLowerCase().replace(/\.[a-z0-9]+$/, "").replace(/[^a-z]/g, ""); }
+  function guessSong(filename) {
+    var f = norm(filename), best = null, bestLen = 0;
+    S.songs.forEach(function (s) {
+      var t = norm(s.title);
+      if (!t || !f) return;
+      if ((f.indexOf(t) > -1 || t.indexOf(f) > -1) && Math.min(t.length, f.length) > bestLen) { best = s; bestLen = Math.min(t.length, f.length); }
+    });
+    return bestLen >= 3 ? best : null;
+  }
+  var bulk = { files: [], kind: "guide" };
+  function renderBulk(msg, kind) {
+    var opts = S.songs.map(function (s) { return '<option value="' + esc(s.id) + '">' + esc(s.title) + ' (' + esc(s.artist.split(" ")[0]) + ')</option>'; }).join("");
+    var rows = bulk.files.map(function (b, i) {
+      return '<tr><td style="overflow-wrap:anywhere">' + esc(b.file.name) + '<div class="meta">' + mb(b.file.size) + '</div></td>' +
+        '<td><select data-bulk="' + i + '" aria-label="Song for ' + esc(b.file.name) + '" style="width:100%;padding:6px 8px;border:1px solid var(--line);border-radius:6px;background:var(--surface)"><option value="">Skip this file</option>' + opts + '</select></td>' +
+        '<td class="meta" id="bulk-st-' + i + '">' + esc(b.status || (b.file.size > MAX_UPLOAD ? "too big" : "")) + '</td></tr>';
+    }).join("");
+    app.innerHTML = header() + '<a class="back" href="#/">← All songs</a>' +
+      '<div class="card admin"><span class="admin-tag">Admin</span><h2>Bulk upload</h2>' +
+      '<p class="muted" style="margin:0">Select many files at once. Each one is matched to a song by its file name; check the matches, fix any that are wrong, then upload.</p>' +
+      '<div class="two"><label class="f" for="b-kind">Upload as<select id="b-kind">' +
+      [["guide", "Guide / full mix"], ["stem", "Stems"], ["chart", "Chord charts"]].map(function (k) { return '<option value="' + k[0] + '"' + (bulk.kind === k[0] ? " selected" : "") + '>' + k[1] + '</option>'; }).join("") + '</select></label>' +
+      '<label class="f" for="b-files">Files<input id="b-files" type="file" multiple accept="audio/*,.pdf,image/png,image/jpeg"></label></div>' +
+      (msg ? '<div class="msg ' + (kind || "err") + '">' + esc(msg) + '</div>' : '') +
+      (bulk.files.length ? '<div class="tablewrap"><table class="band"><thead><tr><th>File</th><th>Song</th><th>Status</th></tr></thead><tbody>' + rows + '</tbody></table></div>' +
+        '<div class="tp-row"><button class="btn primary" id="b-go">Upload ' + bulk.files.length + ' file' + (bulk.files.length > 1 ? "s" : "") + '</button><button class="btn quiet" id="b-clear">Clear</button></div>' : '') +
+      '</div>';
+    bindHeader();
+    bulk.files.forEach(function (b, i) { var sel = app.querySelector('[data-bulk="' + i + '"]'); if (sel) { sel.value = b.songId || ""; sel.onchange = function () { b.songId = sel.value; }; } });
+    $("#b-kind").onchange = function (e) { bulk.kind = e.target.value; };
+    $("#b-files").onchange = function (e) {
+      bulk.files = Array.from(e.target.files || []).map(function (f) { var g = guessSong(f.name); return { file: f, songId: g ? g.id : "", status: "" }; });
+      var unmatched = bulk.files.filter(function (b) { return !b.songId; }).length;
+      renderBulk(bulk.files.length + " file" + (bulk.files.length > 1 ? "s" : "") + " selected." + (unmatched ? " " + unmatched + " couldn't be matched; pick their songs below or leave them skipped." : " All matched to songs."), unmatched ? "err" : "ok");
+    };
+    var clr = $("#b-clear"); if (clr) clr.onclick = function () { bulk.files = []; renderBulk(); };
+    var go = $("#b-go"); if (go) go.onclick = async function () {
+      go.disabled = true;
+      var kindNow = bulk.kind, done = 0, failed = 0;
+      for (var i = 0; i < bulk.files.length; i++) {
+        var b = bulk.files[i], st = document.getElementById("bulk-st-" + i);
+        if (b.status === "done") continue;
+        if (!b.songId) { if (st) st.textContent = "skipped"; continue; }
+        if (b.file.size > MAX_UPLOAD) { b.status = "too big"; if (st) st.textContent = b.status; failed++; continue; }
+        if (st) st.textContent = "uploading…";
+        var path = b.songId + "/" + kindNow + "/" + Date.now() + "-" + safeFile(b.file.name);
+        var up = await sb.storage.from(BUCKET).upload(path, b.file, { contentType: b.file.type || undefined, upsert: false });
+        if (up.error) { b.status = "failed: " + up.error.message; if (st) st.textContent = b.status; failed++; continue; }
+        var song = S.songs.find(function (s) { return s.id === b.songId; });
+        var ins = await sb.from("tracks").insert({ song_id: b.songId, kind: kindNow, label: kindNow === "guide" ? "Guide mix" : prettyName(b.file.name), path: path, sort: tracksFor(b.songId, kindNow).length, size_bytes: b.file.size }).select().single();
+        if (ins.error) { b.status = "failed: " + ins.error.message; if (st) st.textContent = b.status; failed++; continue; }
+        S.tracks.push(ins.data); b.status = "done"; done++;
+        if (st) st.textContent = "done → " + (song ? song.title : "");
+      }
+      go.disabled = false;
+      var m = "Uploaded " + done + " file" + (done === 1 ? "" : "s") + "." + (failed ? " " + failed + " failed; see the Status column." : "");
+      if (!failed) bulk.files = [];
+      renderBulk(m, failed ? "err" : "ok");
+    };
   }
 
   // ---------- boot ----------
