@@ -1,4 +1,4 @@
-/* Messiah Tour Music Room — band site on Supabase.
+/* Messiah Tour Band Portal — band site on Supabase.
    Routes: #/ (library), #/song/<id>, #/band (admin only). */
 (function () {
   "use strict";
@@ -40,6 +40,13 @@
   function mb(n) { return (n / 1048576).toFixed(n > 10485760 ? 0 : 1) + " MB"; }
   var ICON_PLAY = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4.5v15l13-7.5z" fill="currentColor"/></svg>';
   var ICON_PAUSE = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 4h4.5v16H6zM13.5 4H18v16h-4.5z" fill="currentColor"/></svg>';
+  var posterV = "";
+  function poster(cls) {
+    if (!CFG.posterUrl) return "";
+    return '<img class="' + cls + '" src="' + esc(CFG.posterUrl + (posterV ? "?v=" + posterV : "")) + '" alt="Messiah Tour Canada poster: Michael Mahendere and Direct Worship" onerror="this.remove()">';
+  }
+  var TITLE = 'Band <span>Portal</span>';
+  var EYEBROW = 'Messiah Tour Canada 2026 · BVs &amp; Band';
 
   // ---------- data ----------
   async function loadAll() {
@@ -83,8 +90,8 @@
   function renderLogin(msg, kind) {
     var signup = S.loginMode === "signup";
     app.innerHTML =
-      '<div class="login">' +
-      '<div class="top"><div class="eyebrow">Messiah Tour Canada · BVs &amp; Band</div><h1>Music <span>Room</span></h1></div>' +
+      '<div class="login">' + poster("login-poster") +
+      '<div class="top"><div class="eyebrow">' + EYEBROW + '</div><h1>' + TITLE + '</h1></div>' +
       '<form class="card form" id="login-form" novalidate>' +
       '<h2>' + (signup ? "First time here" : "Sign in") + '</h2>' +
       (signup ? '<p class="muted" style="margin:0">Use the email ' + esc(CFG.adminName) + ' added to the band list, and choose a password.</p>' : '') +
@@ -119,14 +126,17 @@
   }
 
   // ---------- header ----------
-  function header() {
-    return '<header class="top">' +
-      '<div class="topline"><div class="eyebrow">Messiah Tour Canada · BVs &amp; Band</div>' +
+  function header(full) {
+    return '<header class="top' + (full ? '' : ' compact') + '">' +
+      '<div class="topline"><div class="eyebrow">' + EYEBROW + '</div>' +
       '<div class="who"><span>' + esc(S.member.name || S.session.user.email) + '</span>' +
       (isAdmin() ? '<a href="#/band">Band list</a>' : '') +
       '<button class="linkbtn" id="signout">Sign out</button></div></div>' +
-      '<h1>Music <span>Room</span></h1>' +
+      (full ? '<div class="hero">' + poster("hero-poster") + '<div class="hero-text">' +
+      '<h1>' + TITLE + '</h1>' +
+      '<div class="presenters">Michael Mahendere &amp; Direct Worship · with Misheck Mahendere and Eleana Makombe</div>' +
       '<div class="dates"><span><b>Edmonton</b> Fri Oct 9</span><span><b>Toronto</b> Sat Oct 10</span><span><b>Vancouver</b> Sun Oct 11</span></div>' +
+      '</div></div>' : '<a class="brand" href="#/">Messiah Tour ' + TITLE + '</a>') +
       '</header>';
   }
   function bindHeader() { var b = $("#signout"); if (b) b.onclick = function () { sb.auth.signOut(); }; }
@@ -134,7 +144,7 @@
   // ---------- library ----------
   function renderList() {
     var total = S.songs.length, ready = S.songs.filter(function (s) { return status(s).cls === "ok"; }).length;
-    var h = header();
+    var h = header(true);
     if (isAdmin() && S.editing) {
       h += '<div class="card admin form"><span class="admin-tag">Admin</span><label class="f" for="notice">Note to the band<textarea id="notice">' + esc(S.notice) + '</textarea></label><div class="tp-row"><button class="btn primary" id="save-notice">Save note</button><button class="btn quiet" id="cancel-notice">Cancel</button></div></div>';
     } else if (S.notice) {
@@ -489,8 +499,23 @@
         var me = m.email === S.session.user.email.toLowerCase();
         return '<tr><td>' + esc(m.name || "") + '</td><td>' + esc(m.email) + '</td><td>' + (m.role === "admin" ? "Admin" : "Band") + '</td><td>' + (me ? '<span class="muted">you</span>' : '<button class="btn danger" data-remove="' + esc(m.email) + '">Remove</button>') + '</td></tr>';
       }).join("") + '</tbody></table></div>' +
-      '<p class="muted" style="margin:0;font-size:13px">Removing someone blocks the music for them straight away. To reset a forgotten password, delete their account under Authentication → Users in Supabase; they can then create a new password here.</p></div>';
+      '<p class="muted" style="margin:0;font-size:13px">Removing someone blocks the music for them straight away. To reset a forgotten password, delete their account under Authentication → Users in Supabase; they can then create a new password here.</p></div>' +
+      '<div class="card admin" style="margin-top:20px"><span class="admin-tag">Admin</span><h2>Tour poster</h2>' +
+      '<div class="poster-admin">' + poster("admin-poster") +
+      '<div class="form"><p class="muted" style="margin:0">Shown on the sign-in screen and at the top of the song list. Anyone with the link can see it, so use public artwork only. JPG, PNG or WebP under 10 MB.</p>' +
+      '<label class="f" for="p-file">Poster image<input id="p-file" type="file" accept="image/jpeg,image/png,image/webp"></label>' +
+      '<div class="tp-row"><button class="btn primary" id="p-upload">Upload poster</button><span id="p-msg" class="muted"></span></div></div></div></div>';
     bindHeader();
+    $("#p-upload").onclick = async function () {
+      var f = ($("#p-file").files || [])[0], msg = $("#p-msg");
+      if (!f) { msg.textContent = "Choose an image first."; return; }
+      $("#p-upload").disabled = true; msg.textContent = "Uploading…";
+      var up = await sb.storage.from("site-assets").upload("poster.jpg", f, { contentType: f.type, upsert: true, cacheControl: "300" });
+      $("#p-upload").disabled = false;
+      if (up.error) { msg.textContent = "Couldn't upload: " + up.error.message; return; }
+      posterV = String(Date.now());
+      renderBand("Poster updated.", "ok");
+    };
     $("#add-form").onsubmit = async function (e) {
       e.preventDefault();
       var email = $("#m-email").value.trim().toLowerCase();
