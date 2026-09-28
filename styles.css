@@ -1,19 +1,20 @@
-/* Layout: a rehearsal binder. Sticky finder bar, songs grouped by artist,
-   each song opens into a mixer desk with its lyrics and parts beneath. */
+/* Layout: a tour band binder. Poster-led hero, sticky finder bar, songs grouped
+   by artist, each song opens into a mixer desk with its lyrics and parts beneath.
+   Palette taken from the Messiah Tour Canada poster: maple red on warm neutrals. */
 :root{
-  --bg:#F5F3F7; --surface:#FFFFFF; --sunk:#EDE9F0; --fg:#1D1A22; --muted:#6C6573; --line:#E2DDE6;
-  --plum:#5B1D4F; --plum-soft:#F1E4EE; --on-plum:#FFFFFF; --gold:#9A6B0C; --gold-soft:#F7EDD6;
-  --ok:#1F6B45; --ok-soft:#E1F1E8; --wait:#8A5A00; --bad:#A3262A; --bad-soft:#FBE4E3;
-  --focus:#7A2E6B;
+  --bg:#F7F4F4; --surface:#FFFFFF; --sunk:#EFEAEA; --fg:#1E1718; --muted:#6E6566; --line:#E6DEDF;
+  --plum:#B0122C; --plum-soft:#FBE6E9; --on-plum:#FFFFFF; --gold:#9A6B0C; --gold-soft:#F7EDD6;
+  --ok:#1F6B45; --ok-soft:#E1F1E8; --wait:#8A5A00; --bad:#8E2A12; --bad-soft:#F8E4DC;
+  --focus:#8E0F24;
   --display:"Bricolage Grotesque","Avenir Next","Segoe UI",system-ui,sans-serif;
   --body:"Atkinson Hyperlegible","Segoe UI",system-ui,-apple-system,sans-serif;
   --mono:"JetBrains Mono",ui-monospace,"SF Mono",Menlo,monospace;
   color-scheme:light;
 }
 @media (prefers-color-scheme: dark){:root{
-  --bg:#141117; --surface:#1E1A22; --sunk:#18141B; --fg:#EFEAF1; --muted:#A79FAE; --line:#332D38;
-  --plum:#E3A7D5; --plum-soft:#3A2236; --on-plum:#1D1320; --gold:#E2B45A; --gold-soft:#3A2F17;
-  --ok:#7FD1A3; --ok-soft:#18342A; --wait:#EDC06A; --bad:#FF9C95; --bad-soft:#3E1D1D; --focus:#E3A7D5;
+  --bg:#150F10; --surface:#1F1718; --sunk:#1A1314; --fg:#F2EAEA; --muted:#AB9FA0; --line:#3A2C2E;
+  --plum:#FF8A99; --plum-soft:#3D1B20; --on-plum:#1F0B0E; --gold:#E2B45A; --gold-soft:#3A2F17;
+  --ok:#7FD1A3; --ok-soft:#18342A; --wait:#EDC06A; --bad:#FFA985; --bad-soft:#3E2219; --focus:#FF8A99;
   color-scheme:dark}}
 *{box-sizing:border-box}
 html{-webkit-text-size-adjust:100%}
@@ -37,6 +38,22 @@ h3{font:700 12px/1 var(--mono);letter-spacing:.07em;text-transform:uppercase;col
 .dates b{color:var(--fg);font-weight:500}
 .notice{background:var(--gold-soft);border-radius:10px;padding:12px 14px;white-space:pre-wrap;font-size:15px}
 .notice strong{display:block;font:700 12px/1.2 var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--gold);margin-bottom:4px}
+.hero{display:flex;gap:20px;align-items:center}
+.hero-text{display:grid;gap:10px;min-width:0}
+.hero-poster{flex:none;width:160px;max-width:40%;aspect-ratio:1/1;object-fit:cover;object-position:50% 30%;border-radius:12px;display:block;box-shadow:0 1px 0 var(--line)}
+.presenters{font-size:15px;color:var(--muted)}
+.top.compact{gap:6px;padding-bottom:6px}
+.brand{font:800 20px/1.1 var(--display);letter-spacing:-.01em;color:var(--fg);text-decoration:none}
+.brand span{color:var(--plum)}
+.login-poster{width:100%;max-width:420px;aspect-ratio:1/1;object-fit:cover;border-radius:14px;display:block}
+.poster-admin{display:flex;flex-wrap:wrap;gap:18px;align-items:flex-start}
+.poster-admin .form{flex:1 1 240px;min-width:0}
+.admin-poster{flex:none;width:140px;aspect-ratio:1/1;object-fit:cover;border-radius:10px;display:block}
+@media (max-width:560px){
+  .hero{gap:14px}
+  .hero-poster{width:96px;border-radius:10px}
+  .presenters{font-size:13px}
+}
 
 /* buttons */
 .btn{font:700 14px var(--body);padding:9px 14px;border-radius:8px;border:1px solid var(--plum);background:var(--surface);color:var(--plum);cursor:pointer;text-decoration:none;display:inline-flex;align-items:center;gap:6px;min-height:40px}

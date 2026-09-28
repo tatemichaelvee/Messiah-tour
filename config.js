@@ -5,5 +5,6 @@ window.MUSIC_ROOM_CONFIG = {
   supabaseUrl: "https://cmllnsyzmcxjerfdncug.supabase.co",
   supabaseKey: "sb_publishable_vlhuJXas-PbwivNPW8NLJw_7qar0hGb",
   bucket: "tour-music",
+  posterUrl: "https://cmllnsyzmcxjerfdncug.supabase.co/storage/v1/object/public/site-assets/poster.jpg",
   adminName: "Tate"
 };
