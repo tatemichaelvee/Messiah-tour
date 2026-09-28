@@ -134,11 +134,12 @@
       '<div class="who"><span>' + esc(S.member.name || S.session.user.email) + '</span>' +
       (isAdmin() ? '<a href="#/band">Band list</a><a href="#/upload">Bulk upload</a>' : '') +
       '<button class="linkbtn" id="signout">Sign out</button></div></div>' +
-      (full ? '<div class="hero">' + poster("hero-poster") + '<div class="hero-text">' +
+      (full ? '<div class="hero"><div class="hero-text">' +
+      '<span class="hero-tag">Vialy Studios Inc &amp; Grateful Events</span>' +
       '<h1>' + TITLE + '</h1>' +
       '<div class="presenters">Michael Mahendere &amp; Direct Worship · with Misheck Mahendere and Eleana Makombe</div>' +
       '<div class="dates"><span><b>Edmonton</b> Fri Oct 9</span><span><b>Toronto</b> Sat Oct 10</span><span><b>Vancouver</b> Sun Oct 11</span></div>' +
-      '</div></div>' : '<a class="brand" href="#/">Messiah Tour ' + TITLE + '</a>') +
+      '</div>' + poster("hero-poster") + '</div>' : '<a class="brand" href="#/">Messiah Tour ' + TITLE + '</a>') +
       '</header>';
   }
   function bindHeader() { var b = $("#signout"); if (b) b.onclick = function () { sb.auth.signOut(); }; }
@@ -146,7 +147,7 @@
   // ---------- library ----------
   function renderList() {
     var total = S.songs.length, ready = S.songs.filter(function (s) { return status(s).cls === "ok"; }).length;
-    var h = header(true);
+    var h = header(true) + '<main class="sheet">';
     if (isAdmin() && S.editing) {
       h += '<div class="card admin form"><span class="admin-tag">Admin</span><label class="f" for="notice">Note to the band<textarea id="notice">' + esc(S.notice) + '</textarea></label><div class="tp-row"><button class="btn primary" id="save-notice">Save note</button><button class="btn quiet" id="cancel-notice">Cancel</button></div></div>';
     } else if (S.notice) {
@@ -158,7 +159,7 @@
       '<div class="chips" role="group" aria-label="Filter by artist"><button class="chip" data-artist="all" aria-pressed="' + (S.artist === "all") + '">All ' + total + '</button>' +
       ARTISTS.map(function (a) { var n = S.songs.filter(function (s) { return s.artist === a.name; }).length; return '<button class="chip" data-artist="' + esc(a.name) + '" aria-pressed="' + (S.artist === a.name) + '">' + a.short + ' ' + n + '</button>'; }).join("") +
       '<span class="progress">' + ready + '/' + total + ' ready</span></div></div><div id="list"></div>' +
-      '<footer><span>“Ready” means stems and lyrics are in. “Partial” means some files are in.</span></footer>';
+      '<footer><span>“Ready” means stems and lyrics are in. “Partial” means some files are in.</span></footer></main>';
     app.innerHTML = h;
     bindHeader();
     drawList();
@@ -183,7 +184,7 @@
         return !q || (s.title + " " + (s.lyrics || "")).toLowerCase().indexOf(q) > -1;
       });
       if (!list.length) return; any = true;
-      out += '<section class="artist"><h2>' + esc(a.name) + '</h2><div class="sub">' + a.role + ' · ' + list.length + ' song' + (list.length > 1 ? "s" : "") + '</div><ol class="songs">';
+      out += '<section class="artist"><div class="artist-head"><h2>' + esc(a.name) + '</h2><span class="sub">' + a.role + ' · ' + list.length + ' song' + (list.length > 1 ? "s" : "") + '</span></div><ol class="songs">';
       list.forEach(function (s) {
         var st = status(s), meta = [s.key ? esc(s.key) : "", s.bpm ? s.bpm + " bpm" : ""].filter(Boolean).join(" · ");
         out += '<li><a class="row" href="#/song/' + encodeURIComponent(s.id) + '"><span class="num">' + String(all.indexOf(s) + 1).padStart(2, "0") + '</span><span class="name">' + esc(s.title) + '</span><span class="meta">' + meta + '</span><span class="pill ' + st.cls + '">' + st.text + '</span></a></li>';
@@ -196,16 +197,17 @@
   // ---------- song page ----------
   function renderSong(id) {
     var s = S.songs.find(function (x) { return x.id === id; });
-    if (!s) { app.innerHTML = header() + '<p>That song isn’t in the library. <a href="#/">Back to all songs</a></p>'; bindHeader(); return; }
+    if (!s) { app.innerHTML = header() + '<main class="sheet"><p>That song isn’t in the library. <a href="#/">Back to all songs</a></p></main>'; bindHeader(); return; }
     var stems = tracksFor(id, "stem"), guides = tracksFor(id, "guide"), charts = tracksFor(id, "chart");
     var mixTracks = stems.concat(guides);
     var facts = [];
-    if (s.key) facts.push("Key <b>" + esc(s.key) + "</b>");
-    if (s.bpm) facts.push("BPM <b>" + esc(s.bpm) + "</b>");
-    facts.push("<b>" + esc(s.artist) + "</b>");
-    var h = header() +
+    if (s.key) facts.push("<span>Key <b>" + esc(s.key) + "</b></span>");
+    if (s.bpm) facts.push("<span>BPM <b>" + esc(s.bpm) + "</b></span>");
+    facts.push("<span><b>" + esc(s.artist) + "</b></span>");
+    var h = header() + '<main class="sheet">' +
       '<a class="back" href="#/">← All songs</a>' +
-      '<div class="songhead"><h1>' + esc(s.title) + '</h1><div class="facts">' + facts.join("") + '</div></div>';
+      '<div class="songhead"><h1>' + esc(s.title) + '</h1><div class="facts">' + facts.join("") + '</div></div>' +
+      '<div class="songgrid"><div class="col-main">';
 
     // mixer
     h += '<div class="block"><h3>Practice mixer</h3>';
@@ -236,10 +238,13 @@
     if (charts.length) {
       h += '<div class="block"><h3>Charts</h3><div class="charts">' + charts.map(function (c) { return '<button class="btn quiet" data-chart="' + esc(c.id) + '">' + esc(c.label) + ' ↗</button>'; }).join("") + '</div></div>';
     }
+    h += '</div><div class="col-side">';
     if (s.bv_notes) h += '<div class="block"><h3>BV parts &amp; cues</h3><div class="bvnotes">' + esc(s.bv_notes) + '</div></div>';
     h += '<div class="block"><h3>Lyrics</h3>' + (s.lyrics ? '<p class="lyrics">' + esc(s.lyrics) + '</p>' : '<p class="empty">Lyrics not added yet.</p>') + '</div>';
+    h += '</div></div>';
 
     if (isAdmin()) h += adminSongPanel(s, mixTracks.concat(charts));
+    h += '</main>';
     app.innerHTML = h;
     bindHeader();
 
@@ -488,7 +493,7 @@
   async function renderBand(msg, kind) {
     var r = await sb.from("band_members").select("*").order("role").order("name");
     var rows = r.data || [];
-    app.innerHTML = header() + '<a class="back" href="#/">← All songs</a>' +
+    app.innerHTML = header() + '<main class="sheet"><a class="back" href="#/">← All songs</a>' +
       '<div class="card admin"><span class="admin-tag">Admin</span><h2>Band list</h2>' +
       '<p class="muted" style="margin:0">Only these emails can create an account and open the music. Add someone, then send them the site link; they choose their own password on first visit.</p>' +
       '<form class="form" id="add-form"><div class="two"><label class="f" for="m-name">Name<input id="m-name" placeholder="e.g. Rudo (BV alto)"></label>' +
@@ -506,7 +511,7 @@
       '<div class="poster-admin">' + poster("admin-poster") +
       '<div class="form"><p class="muted" style="margin:0">Shown on the sign-in screen and at the top of the song list. Anyone with the link can see it, so use public artwork only. JPG, PNG or WebP under 10 MB.</p>' +
       '<label class="f" for="p-file">Poster image<input id="p-file" type="file" accept="image/jpeg,image/png,image/webp"></label>' +
-      '<div class="tp-row"><button class="btn primary" id="p-upload">Upload poster</button><span id="p-msg" class="muted"></span></div></div></div></div>';
+      '<div class="tp-row"><button class="btn primary" id="p-upload">Upload poster</button><span id="p-msg" class="muted"></span></div></div></div></div></main>';
     bindHeader();
     $("#p-upload").onclick = async function () {
       var f = ($("#p-file").files || [])[0], msg = $("#p-msg");
@@ -556,7 +561,7 @@
         '<td><select data-bulk="' + i + '" aria-label="Song for ' + esc(b.file.name) + '" style="width:100%;padding:6px 8px;border:1px solid var(--line);border-radius:6px;background:var(--surface)"><option value="">Skip this file</option>' + opts + '</select></td>' +
         '<td class="meta" id="bulk-st-' + i + '">' + esc(b.status || (b.file.size > MAX_UPLOAD ? "too big" : "")) + '</td></tr>';
     }).join("");
-    app.innerHTML = header() + '<a class="back" href="#/">← All songs</a>' +
+    app.innerHTML = header() + '<main class="sheet"><a class="back" href="#/">← All songs</a>' +
       '<div class="card admin"><span class="admin-tag">Admin</span><h2>Bulk upload</h2>' +
       '<p class="muted" style="margin:0">Select many files at once. Each one is matched to a song by its file name; check the matches, fix any that are wrong, then upload.</p>' +
       '<div class="two"><label class="f" for="b-kind">Upload as<select id="b-kind">' +
@@ -565,7 +570,7 @@
       (msg ? '<div class="msg ' + (kind || "err") + '">' + esc(msg) + '</div>' : '') +
       (bulk.files.length ? '<div class="tablewrap"><table class="band"><thead><tr><th>File</th><th>Song</th><th>Status</th></tr></thead><tbody>' + rows + '</tbody></table></div>' +
         '<div class="tp-row"><button class="btn primary" id="b-go">Upload ' + bulk.files.length + ' file' + (bulk.files.length > 1 ? "s" : "") + '</button><button class="btn quiet" id="b-clear">Clear</button></div>' : '') +
-      '</div>';
+      '</div></main>';
     bindHeader();
     bulk.files.forEach(function (b, i) { var sel = app.querySelector('[data-bulk="' + i + '"]'); if (sel) { sel.value = b.songId || ""; sel.onchange = function () { b.songId = sel.value; }; } });
     $("#b-kind").onchange = function (e) { bulk.kind = e.target.value; };
