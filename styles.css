@@ -1,24 +1,21 @@
 /* Layout: a tour band binder. Poster-led hero, sticky finder bar, songs grouped
    by artist, each song opens into a mixer desk with its lyrics and parts beneath.
-   Palette taken from the Messiah Tour Canada poster: maple red on warm neutrals. */
+   Black stage, maple-red accents from the tour poster, white buttons. */
 :root{
-  --bg:#F7F4F4; --surface:#FFFFFF; --sunk:#EFEAEA; --fg:#1E1718; --muted:#6E6566; --line:#E6DEDF;
-  --plum:#B0122C; --plum-soft:#FBE6E9; --on-plum:#FFFFFF; --gold:#9A6B0C; --gold-soft:#F7EDD6;
-  --ok:#1F6B45; --ok-soft:#E1F1E8; --wait:#8A5A00; --bad:#8E2A12; --bad-soft:#F8E4DC;
-  --focus:#8E0F24;
+  --bg:#0A0A0A; --surface:#151515; --sunk:#101010; --fg:#FFFFFF; --muted:#A8A3A3; --line:#2B2B2B;
+  --plum:#FF4557; --red:#D7182A; --plum-soft:#2A0F13; --on-plum:#FFFFFF;
+  --btn-bg:#FFFFFF; --btn-fg:#0A0A0A; --btn-hover:#E6E6E6;
+  --gold:#F0C261; --gold-soft:#2B2210;
+  --ok:#7FD1A3; --ok-soft:#12291F; --wait:#F0C261; --bad:#FF7A6B; --bad-soft:#331512;
+  --focus:#FFFFFF;
   --display:"Bricolage Grotesque","Avenir Next","Segoe UI",system-ui,sans-serif;
   --body:"Atkinson Hyperlegible","Segoe UI",system-ui,-apple-system,sans-serif;
   --mono:"JetBrains Mono",ui-monospace,"SF Mono",Menlo,monospace;
-  color-scheme:light;
+  color-scheme:dark;
 }
-@media (prefers-color-scheme: dark){:root{
-  --bg:#150F10; --surface:#1F1718; --sunk:#1A1314; --fg:#F2EAEA; --muted:#AB9FA0; --line:#3A2C2E;
-  --plum:#FF8A99; --plum-soft:#3D1B20; --on-plum:#1F0B0E; --gold:#E2B45A; --gold-soft:#3A2F17;
-  --ok:#7FD1A3; --ok-soft:#18342A; --wait:#EDC06A; --bad:#FFA985; --bad-soft:#3E2219; --focus:#FF8A99;
-  color-scheme:dark}}
 *{box-sizing:border-box}
 html{-webkit-text-size-adjust:100%}
-body{background:var(--bg);color:var(--fg);font:16px/1.5 var(--body);margin:0;padding:env(safe-area-inset-top,0) 0 env(safe-area-inset-bottom,0)}
+body{background:var(--bg);color:var(--fg);font:16px/1.5 var(--body);margin:0;padding:env(safe-area-inset-top,0) 0 env(safe-area-inset-bottom,0);border-top:4px solid var(--red)}
 .wrap{max-width:880px;margin:0 auto;padding-inline:16px;padding-block:28px 72px}
 a{color:var(--plum)}
 button,input,textarea,select{font:inherit;color:inherit}
@@ -36,8 +33,8 @@ h3{font:700 12px/1 var(--mono);letter-spacing:.07em;text-transform:uppercase;col
 .who{display:flex;gap:10px;align-items:center;font-size:14px;color:var(--muted);flex-wrap:wrap}
 .dates{display:flex;flex-wrap:wrap;gap:6px 18px;font:500 13px/1.4 var(--mono);color:var(--muted)}
 .dates b{color:var(--fg);font-weight:500}
-.notice{background:var(--gold-soft);border-radius:10px;padding:12px 14px;white-space:pre-wrap;font-size:15px}
-.notice strong{display:block;font:700 12px/1.2 var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--gold);margin-bottom:4px}
+.notice{background:var(--plum-soft);border-left:3px solid var(--red);border-radius:10px;padding:12px 14px;white-space:pre-wrap;font-size:15px}
+.notice strong{display:block;font:700 12px/1.2 var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--plum);margin-bottom:4px}
 .hero{display:flex;gap:20px;align-items:center}
 .hero-text{display:grid;gap:10px;min-width:0}
 .hero-poster{flex:none;width:160px;max-width:40%;aspect-ratio:1/1;object-fit:cover;object-position:50% 30%;border-radius:12px;display:block;box-shadow:0 1px 0 var(--line)}
@@ -56,10 +53,13 @@ h3{font:700 12px/1 var(--mono);letter-spacing:.07em;text-transform:uppercase;col
 }
 
 /* buttons */
-.btn{font:700 14px var(--body);padding:9px 14px;border-radius:8px;border:1px solid var(--plum);background:var(--surface);color:var(--plum);cursor:pointer;text-decoration:none;display:inline-flex;align-items:center;gap:6px;min-height:40px}
-.btn.primary{background:var(--plum);color:var(--on-plum)}
-.btn.quiet{border-color:var(--line);color:var(--fg)}
-.btn.danger{border-color:var(--bad);color:var(--bad)}
+.btn{font:700 14px var(--body);padding:9px 16px;border-radius:999px;border:1px solid var(--btn-bg);background:var(--btn-bg);color:var(--btn-fg);cursor:pointer;text-decoration:none;display:inline-flex;align-items:center;gap:6px;min-height:40px}
+.btn:hover:not(:disabled){background:var(--btn-hover)}
+.btn.primary{background:var(--btn-bg);color:var(--btn-fg)}
+.btn.quiet{background:transparent;border-color:var(--fg);color:var(--fg)}
+.btn.quiet:hover:not(:disabled){background:var(--surface)}
+.btn.danger{background:transparent;border-color:var(--bad);color:var(--bad)}
+.btn.danger:hover:not(:disabled){background:var(--bad-soft)}
 .btn:disabled{opacity:.5;cursor:default}
 .linkbtn{background:none;border:0;padding:0;color:var(--plum);cursor:pointer;text-decoration:underline;font-size:14px}
 
@@ -67,8 +67,8 @@ h3{font:700 12px/1 var(--mono);letter-spacing:.07em;text-transform:uppercase;col
 .finder{position:sticky;top:env(safe-area-inset-top,0px);z-index:5;background:var(--bg);padding-block:10px;display:grid;gap:10px;border-bottom:1px solid var(--line)}
 .search{width:100%;padding:11px 14px;border:1px solid var(--line);border-radius:10px;background:var(--surface)}
 .chips{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
-.chip{font:700 13px/1 var(--body);padding:8px 12px;border-radius:999px;border:1px solid var(--line);background:var(--surface);cursor:pointer}
-.chip[aria-pressed="true"]{background:var(--plum);border-color:var(--plum);color:var(--on-plum)}
+.chip{font:700 13px/1 var(--body);padding:8px 12px;border-radius:999px;border:1px solid var(--fg);background:transparent;cursor:pointer}
+.chip[aria-pressed="true"]{background:var(--btn-bg);border-color:var(--btn-bg);color:var(--btn-fg)}
 .progress{margin-left:auto;font:500 12px var(--mono);color:var(--muted);font-variant-numeric:tabular-nums}
 
 /* song list */
@@ -99,15 +99,15 @@ ol.songs li{border-bottom:1px solid var(--line)}
 .desk{background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden}
 .transport{display:grid;gap:12px;padding:14px;background:var(--sunk);border-bottom:1px solid var(--line)}
 .tp-row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
-.play{width:52px;height:52px;border-radius:50%;border:0;background:var(--plum);color:var(--on-plum);cursor:pointer;display:grid;place-items:center;flex:none}
+.play{width:52px;height:52px;border-radius:50%;border:0;background:var(--btn-bg);color:var(--btn-fg);cursor:pointer;display:grid;place-items:center;flex:none}
 .play:disabled{opacity:.45;cursor:default}
 .play svg{width:22px;height:22px}
 .clock{font:500 14px var(--mono);font-variant-numeric:tabular-nums;min-width:9.5ch}
 .scrub{flex:1 1 180px;min-width:0}
-input[type=range]{accent-color:var(--plum);width:100%}
+input[type=range]{accent-color:var(--red);width:100%}
 .seg{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}
 .seg button{border:0;background:var(--surface);padding:7px 10px;font:700 13px var(--mono);cursor:pointer}
-.seg button[aria-pressed="true"]{background:var(--plum);color:var(--on-plum)}
+.seg button[aria-pressed="true"]{background:var(--btn-bg);color:var(--btn-fg)}
 .tp-label{font:500 12px var(--mono);color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
 .loopinfo{font:500 13px var(--mono);color:var(--muted);font-variant-numeric:tabular-nums}
 .loadbar{font-size:14px;color:var(--muted)}
@@ -120,7 +120,7 @@ input[type=range]{accent-color:var(--plum);width:100%}
 .ms{display:inline-flex;gap:4px}
 .ms button{width:34px;height:34px;border-radius:6px;border:1px solid var(--line);background:var(--surface);font:700 13px var(--mono);cursor:pointer}
 .ms .m[aria-pressed="true"]{background:var(--bad-soft);border-color:var(--bad);color:var(--bad)}
-.ms .s[aria-pressed="true"]{background:var(--gold-soft);border-color:var(--gold);color:var(--gold)}
+.ms .s[aria-pressed="true"]{background:var(--btn-bg);border-color:var(--btn-bg);color:var(--btn-fg)}
 .dl{font-size:13px;white-space:nowrap}
 .empty{color:var(--muted);font-style:italic}
 .charts{display:flex;gap:8px;flex-wrap:wrap}
@@ -138,7 +138,7 @@ label.f{display:grid;gap:5px;font:700 12px var(--mono);letter-spacing:.04em;text
 .msg{font-size:14px;padding:10px 12px;border-radius:8px}
 .msg.err{background:var(--bad-soft);color:var(--bad)}
 .msg.ok{background:var(--ok-soft);color:var(--ok)}
-.admin{border:1px dashed var(--plum)}
+.admin{border:1px dashed var(--red)}
 .admin-tag{font:700 11px var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--plum)}
 .uplist{display:grid;gap:6px;font-size:14px}
 .uplist li{display:flex;justify-content:space-between;gap:10px}
