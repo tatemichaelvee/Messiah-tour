@@ -18,10 +18,11 @@
 /* keep the slide from causing a sideways scrollbar */
 html, body { overflow-x: clip; }
 
-/* Song page: hide the duplicated read-only BV cues and lyrics.
-   The admin edit fields below the song remain visible. */
-.songgrid .col-side { display: none; }
-.songgrid { grid-template-columns: minmax(0, 1fr) !important; }
+/* Song page: mixer and notes share the screen on desktop. */
+.songgrid .col-side { display: block; }
+@media (min-width:980px) {
+  .songgrid { grid-template-columns:minmax(0,1.65fr) minmax(280px,.85fr) !important; gap:0 28px; }
+}
 
 @media (prefers-reduced-motion: reduce) {
   #app.pt-enter { animation: none !important; }
