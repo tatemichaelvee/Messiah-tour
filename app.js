@@ -229,7 +229,7 @@
           return '<div class="trk" data-i="' + i + '"><span class="tname"><span class="tkind">' + (t.kind === "guide" ? "Guide mix" : "Stem") + '</span>' + esc(t.label) + '</span>' +
             '<span class="ms"><button class="m" data-mute="' + i + '" aria-pressed="false" aria-label="Mute ' + esc(t.label) + '">M</button><button class="s" data-solo="' + i + '" aria-pressed="false" aria-label="Solo ' + esc(t.label) + '">S</button></span>' +
             '<input type="range" min="0" max="1" step="0.01" value="1" data-vol="' + i + '" aria-label="Volume ' + esc(t.label) + '">' +
-            '<button class="linkbtn dl" data-dl="' + esc(t.id) + '">Download</button></div>';
+            (isAdmin() ? '<button class="linkbtn dl" data-dl="' + esc(t.id) + '">Download</button>' : '<span class="dl" aria-hidden="true"></span>') + '</div>';
         }).join("") + '</div></div>';
       if (stems.length && guides.length) h += '<p class="muted" style="font-size:14px">The guide mix starts muted so it doesn’t double the stems. Unmute it to hear the full recording.</p>';
     }
@@ -253,12 +253,13 @@
       mixer = new Mixer(mixTracks, stems.length > 0);
       mixer.start();
     }
-    app.querySelectorAll("[data-dl]").forEach(function (b) { b.onclick = function () { openFile(b.dataset.dl, true); }; });
+    if (isAdmin()) app.querySelectorAll("[data-dl]").forEach(function (b) { b.onclick = function () { openFile(b.dataset.dl, true); }; });
     app.querySelectorAll("[data-chart]").forEach(function (b) { b.onclick = function () { openFile(b.dataset.chart, false); }; });
     if (isAdmin()) bindAdminSong(s);
   }
 
   async function openFile(trackId, download) {
+    if (download && !isAdmin()) return; // only admins can download audio
     var t = S.tracks.find(function (x) { return x.id === trackId; });
     if (!t) return;
     var win = window.open("", "_blank");
@@ -498,7 +499,7 @@
       '<p class="muted" style="margin:0">Only these emails can create an account and open the music. Add someone, then send them the site link; they choose their own password on first visit.</p>' +
       '<form class="form" id="add-form"><div class="two"><label class="f" for="m-name">Name<input id="m-name" placeholder="e.g. Rudo (BV alto)"></label>' +
       '<label class="f" for="m-email">Email<input id="m-email" type="email" required></label>' +
-      '<label class="f" for="m-role">Access<select id="m-role"><option value="band">Band (listen &amp; download)</option><option value="admin">Admin (can upload &amp; edit)</option></select></label></div>' +
+      '<label class="f" for="m-role">Access<select id="m-role"><option value="band">Band (listen only)</option><option value="admin">Admin (can upload &amp; edit)</option></select></label></div>' +
       (msg ? '<div class="msg ' + (kind || "err") + '">' + esc(msg) + '</div>' : '') +
       '<div><button class="btn primary" type="submit">Add to band list</button></div></form>' +
       '<div class="tablewrap"><table class="band"><thead><tr><th>Name</th><th>Email</th><th>Access</th><th></th></tr></thead><tbody>' +
