@@ -150,6 +150,13 @@ input[type=range]{accent-color:var(--red);width:100%}
 .empty{color:var(--muted);font-style:italic}
 .charts{display:flex;gap:8px;flex-wrap:wrap}
 .lyrics{white-space:pre-wrap;font-size:18px;line-height:1.75;max-width:62ch;margin:0}
+/* part colours from the MD's lyric sheet: yellow unison, pink harmony, blue inversion */
+.pt{color:#161213;padding:.05em .2em;border-radius:4px;-webkit-box-decoration-break:clone;box-decoration-break:clone}
+.pt-u{background:#FFEF5A}
+.pt-h{background:#FF9DEE}
+.pt-i{background:#86EEF5}
+.legend{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 14px}
+.legend .pt{font:700 12px/1 var(--mono);letter-spacing:.05em;text-transform:uppercase;padding:7px 10px;border-radius:999px}
 .bvnotes{background:var(--red-soft);border-left:4px solid var(--red);border-radius:10px;padding:12px 14px;white-space:pre-wrap;max-width:62ch}
 
 /* forms and admin */
