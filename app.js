@@ -12,7 +12,8 @@
     { name: "Eleana Makombe", short: "Eleana", role: "Supporting set" },
     { name: "Misheck Mahendere", short: "Misheck", role: "Supporting set" }
   ];
-  var MAX_UPLOAD = 50 * 1024 * 1024;
+  var MAX_UPLOAD = 1024 * 1024 * 1024; // 1 GB per file (Supabase Pro)
+  var CHUNK = 6 * 1024 * 1024; // Supabase resumable uploads need exactly 6 MB chunks
 
   var app = document.getElementById("app");
   var S = {
@@ -49,7 +50,44 @@
     if (!used.length) return "";
     return '<div class="legend" aria-label="Part colours">' + used.map(function (p) { return '<span class="pt pt-' + p + '">' + PARTS[p] + '</span>'; }).join("") + '</div>';
   }
-  function mb(n) { return (n / 1048576).toFixed(n > 10485760 ? 0 : 1) + " MB"; }
+  function mb(n) { return n >= 1073741824 ? (n / 1073741824).toFixed(1) + " GB" : (n / 1048576).toFixed(n > 10485760 ? 0 : 1) + " MB"; }
+  // Big files go up in resumable 6 MB chunks (tus), so a dropped connection
+  // retries the chunk instead of restarting a 500 MB upload.
+  var tusLoading = null;
+  function loadTus() {
+    if (window.tus) return Promise.resolve(window.tus);
+    if (!tusLoading) tusLoading = new Promise(function (res) {
+      var sc = document.createElement("script");
+      sc.src = "https://cdn.jsdelivr.net/npm/tus-js-client@4/dist/tus.min.js";
+      sc.onload = function () { res(window.tus || null); };
+      sc.onerror = function () { res(null); };
+      document.head.appendChild(sc);
+    });
+    return tusLoading;
+  }
+  async function uploadFile(path, file, contentType, onProgress) {
+    if (file.size <= CHUNK) return sb.storage.from(BUCKET).upload(path, file, { contentType: contentType, upsert: false });
+    var tus = await loadTus();
+    var sess = await sb.auth.getSession();
+    var token = sess.data && sess.data.session && sess.data.session.access_token;
+    if (!tus || !token || !tus.isSupported) return sb.storage.from(BUCKET).upload(path, file, { contentType: contentType, upsert: false });
+    var endpoint = CFG.supabaseUrl.replace(".supabase.co", ".storage.supabase.co") + "/storage/v1/upload/resumable";
+    return new Promise(function (resolve) {
+      var up = new tus.Upload(file, {
+        endpoint: endpoint,
+        retryDelays: [0, 3000, 5000, 10000, 20000, 30000],
+        headers: { authorization: "Bearer " + token, apikey: CFG.supabaseKey, "x-upsert": "false" },
+        uploadDataDuringCreation: true,
+        removeFingerprintOnSuccess: true,
+        chunkSize: CHUNK,
+        metadata: { bucketName: BUCKET, objectName: path, contentType: contentType || "application/octet-stream", cacheControl: "3600" },
+        onError: function (err) { var m = String((err && err.message) || err); var r = m.match(/response text: (.*?)(,|$)/); resolve({ error: { message: r ? r[1] : m } }); },
+        onProgress: function (sent, total) { if (onProgress) onProgress(sent / total); },
+        onSuccess: function () { resolve({ data: { path: path } }); }
+      });
+      up.start();
+    });
+  }
   var ICON_PLAY = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4.5v15l13-7.5z" fill="currentColor"/></svg>';
   var ICON_PAUSE = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 4h4.5v16H6zM13.5 4H18v16h-4.5z" fill="currentColor"/></svg>';
   var posterV = "";
@@ -471,7 +509,7 @@
       '<div class="form"><h3 style="margin:0">Upload files</h3>' +
       '<div class="two"><label class="f" for="a-kind">What are you uploading?<select id="a-kind"><option value="stem">Stems (pick several at once)</option><option value="guide">Guide / full mix</option><option value="chart">Chord chart (PDF or image)</option></select></label>' +
       '<label class="f" for="a-files">Files<input id="a-files" type="file" multiple accept="audio/*,.pdf,image/png,image/jpeg"></label></div>' +
-      '<p class="muted" style="margin:0;font-size:13px">Each file must be under 50 MB. MP3 or M4A stems keep well under that; long WAV stems often won’t fit.</p>' +
+      '<p class="muted" style="margin:0;font-size:13px">Files up to 1 GB. Big WAVs upload in resumable chunks, so keep this tab open until they finish.</p>' +
       '<div class="tp-row"><button class="btn primary" id="a-upload">Upload</button></div><ul class="uplist" id="a-uplog" style="list-style:none;padding:0;margin:0"></ul></div>' +
       (files.length ? '<hr style="border:0;border-top:1px solid var(--line);width:100%"><div class="form"><h3 style="margin:0">Files on this song</h3><div class="tablewrap"><table class="band"><thead><tr><th>Name</th><th>Type</th><th>Size</th><th></th></tr></thead><tbody>' +
         files.map(function (t) { return '<tr><td><input class="f-rename" data-id="' + esc(t.id) + '" value="' + esc(t.label) + '" aria-label="Track name" style="width:100%;padding:6px 8px;border:1px solid var(--line);border-radius:6px;background:var(--surface)"></td><td>' + t.kind + '</td><td class="meta">' + (t.size_bytes ? mb(t.size_bytes) : "") + '</td><td><button class="btn danger" data-del="' + esc(t.id) + '">Delete</button></td></tr>'; }).join("") +
@@ -500,7 +538,8 @@
         li.innerHTML = "<span>" + esc(f.name) + "</span><span class='meta'>uploading…</span>"; log.appendChild(li);
         if (f.size > MAX_UPLOAD) { li.lastChild.textContent = "too big (" + mb(f.size) + ")"; continue; }
         var path = s.id + "/" + kind + "/" + Date.now() + "-" + safeFile(f.name);
-        var up = await sb.storage.from(BUCKET).upload(path, f, { contentType: f.type || undefined, upsert: false });
+        var status = li.lastChild;
+        var up = await uploadFile(path, f, f.type || undefined, function (p) { status.textContent = "uploading " + Math.round(p * 100) + "%"; });
         if (up.error) { li.lastChild.textContent = "failed: " + up.error.message; continue; }
         var ins = await sb.from("tracks").insert({ song_id: s.id, kind: kind, label: prettyName(f.name), path: path, sort: base + i, size_bytes: f.size }).select().single();
         if (ins.error) { li.lastChild.textContent = "saved file but not listed: " + ins.error.message; continue; }
@@ -696,18 +735,18 @@
           return '<tr><td style="overflow-wrap:anywhere">' + esc(b.file.name) + '<div class="meta" style="white-space:normal">' + esc(b.path.split("/").slice(0, -1).join(" / ")) + (b.path.indexOf("/") > -1 ? " · " : "") + mb(b.file.size) + '</div></td>' +
             '<td><select data-bulk="' + i + '" aria-label="Song for ' + esc(b.file.name) + '" class="bulk-sel"><option value="">Skip this file</option>' + opts + '</select></td>' +
             '<td><select data-bkind="' + i + '" aria-label="Type for ' + esc(b.file.name) + '" class="bulk-sel">' + kinds.map(function (x) { return '<option value="' + x[0] + '"' + (b.kind === x[0] ? " selected" : "") + '>' + x[1] + '</option>'; }).join("") + '</select></td>' +
-            '<td class="meta" id="bulk-st-' + i + '">' + esc(b.status || (b.file.size > MAX_UPLOAD ? "too big (max 50 MB)" : "")) + '</td></tr>';
+            '<td class="meta" id="bulk-st-' + i + '">' + esc(b.status || (b.file.size > MAX_UPLOAD ? "too big (max 1 GB)" : "")) + '</td></tr>';
         }).join("") + '</tbody>';
     }).join("");
     app.innerHTML = header() + '<main class="sheet"><a class="back" href="#/"><span class="arr" aria-hidden="true">←</span> All songs</a>' +
       '<div class="card admin"><span class="admin-tag">Admin</span><h2>Bulk upload</h2>' +
       '<p class="muted" style="margin:0">Drop whole stem folders here, or pick them. A folder named after a song (e.g. “Bako Rangu Stems”) sends every file inside it to that song. You can also drop one big folder that holds a folder per song. Check the matches, fix any, then upload.</p>' +
-      '<div class="dropzone" id="b-drop" tabindex="0"><strong>Drop folders or files here</strong><span class="muted">Audio (WAV, MP3, M4A, AIFF, FLAC), PDF charts and images · up to 50 MB each</span>' +
+      '<div class="dropzone" id="b-drop" tabindex="0"><strong>Drop folders or files here</strong><span class="muted">Audio (WAV, MP3, M4A, AIFF, FLAC), PDF charts and images · up to 1 GB each</span>' +
       '<span class="tp-row" style="justify-content:center"><label class="btn primary" for="b-folder">Choose folder</label><label class="btn quiet" for="b-files">Choose files</label></span>' +
       '<input id="b-folder" type="file" webkitdirectory directory multiple hidden><input id="b-files" type="file" multiple accept="audio/*,.aif,.aiff,.pdf,image/png,image/jpeg" hidden></div>' +
       (msg ? '<div class="msg ' + (kind || "err") + '">' + esc(msg) + '</div>' : '') +
       (total ? '<div class="tablewrap"><table class="band bulk"><thead><tr><th>File</th><th>Song</th><th>Type</th><th>Status</th></tr></thead>' + table + '</table></div>' +
-        (big ? '<p class="msg err" style="margin:0">' + big + ' file' + (big > 1 ? "s are" : " is") + ' over 50 MB and will be skipped. Export those stems as MP3 or M4A (320 kbps is plenty for practice) and add them again.</p>' : '') +
+        (big ? '<p class="msg err" style="margin:0">' + big + ' file' + (big > 1 ? "s are" : " is") + ' over 1 GB and will be skipped. Export those as MP3 or M4A and add them again.</p>' : '') +
         '<div class="tp-row"><button class="btn primary" id="b-go">Upload ' + bulk.files.filter(function (b) { return b.songId && b.status !== "done"; }).length + ' matched file(s)</button><button class="btn quiet" id="b-clear">Clear list</button><span class="muted" id="b-progress"></span></div>' : '') +
       '</div></main>';
     bindHeader();
@@ -734,14 +773,14 @@
       var setSt = function (i, t) { bulk.files[i].status = t; var el = document.getElementById("bulk-st-" + i); if (el) el.textContent = t; };
       async function one(i) {
         var b = bulk.files[i];
-        if (b.file.size > MAX_UPLOAD) { setSt(i, "too big (max 50 MB)"); failed++; return; }
+        if (b.file.size > MAX_UPLOAD) { setSt(i, "too big (max 1 GB)"); failed++; return; }
         var label = prettyName(b.file.name);
         if (S.tracks.some(function (t) { return t.song_id === b.songId && t.label === label && t.size_bytes === b.file.size; })) { setSt(i, "already on the song"); skipped++; return; }
         setSt(i, "uploading…");
         var e = extOf(b.file.name), type = b.file.type || AUDIO_EXT[e] || OTHER_EXT[e] || undefined;
         if (type === "audio/x-m4a") type = "audio/mp4";
         var path = b.songId + "/" + b.kind + "/" + Date.now() + "-" + Math.random().toString(36).slice(2, 6) + "-" + safeFile(b.file.name);
-        var up = await sb.storage.from(BUCKET).upload(path, b.file, { contentType: type, upsert: false });
+        var up = await uploadFile(path, b.file, type, function (p) { setSt(i, "uploading " + Math.round(p * 100) + "%"); });
         if (up.error) { setSt(i, "failed: " + up.error.message); failed++; return; }
         var ins = await sb.from("tracks").insert({ song_id: b.songId, kind: b.kind, label: b.kind === "guide" && !/guide|mix/i.test(label) ? "Guide mix" : label, path: path, sort: tracksFor(b.songId, b.kind).length, size_bytes: b.file.size }).select().single();
         if (ins.error) { setSt(i, "failed: " + ins.error.message); failed++; return; }
