@@ -37,6 +37,18 @@
     return filename.replace(/\.[a-z0-9]+$/i, "").replace(/[_]+/g, " ").replace(/\s+/g, " ").trim();
   }
   function safeFile(filename) { return filename.toLowerCase().replace(/[^a-z0-9.\-]+/g, "-").replace(/-+/g, "-"); }
+  // Lyrics can carry part markers from the MD's colour-coded sheet:
+  // {{u|text}} unison, {{h|text}} harmony, {{i|text}} inversion.
+  var PARTS = { u: "Unison", h: "Harmony", i: "Inversion" };
+  function plainLyrics(t) { return String(t || "").replace(/\{\{[uhi]\||\}\}/g, ""); }
+  function lyricsHtml(t) {
+    return esc(t).replace(/\{\{([uhi])\|([^}]*)\}\}/g, function (_, p, x) { return '<mark class="pt pt-' + p + '" title="' + PARTS[p] + '">' + x + '</mark>'; });
+  }
+  function partsLegend(t) {
+    var used = Object.keys(PARTS).filter(function (p) { return String(t || "").indexOf("{{" + p + "|") > -1; });
+    if (!used.length) return "";
+    return '<div class="legend" aria-label="Part colours">' + used.map(function (p) { return '<span class="pt pt-' + p + '">' + PARTS[p] + '</span>'; }).join("") + '</div>';
+  }
   function mb(n) { return (n / 1048576).toFixed(n > 10485760 ? 0 : 1) + " MB"; }
   var ICON_PLAY = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4.5v15l13-7.5z" fill="currentColor"/></svg>';
   var ICON_PAUSE = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 4h4.5v16H6zM13.5 4H18v16h-4.5z" fill="currentColor"/></svg>';
@@ -181,7 +193,7 @@
       var all = S.songs.filter(function (s) { return s.artist === a.name; });
       var list = all.filter(function (s) {
         if (S.artist !== "all" && S.artist !== a.name) return false;
-        return !q || (s.title + " " + (s.lyrics || "")).toLowerCase().indexOf(q) > -1;
+        return !q || (s.title + " " + plainLyrics(s.lyrics)).toLowerCase().indexOf(q) > -1;
       });
       if (!list.length) return; any = true;
       out += '<section class="artist"><div class="artist-head"><h2>' + esc(a.name) + '</h2><span class="sub">' + a.role + ' · ' + list.length + ' song' + (list.length > 1 ? "s" : "") + '</span></div><ol class="songs">';
@@ -240,7 +252,7 @@
     }
     h += '</div><div class="col-side">';
     if (s.bv_notes) h += '<div class="block"><h3>BV parts &amp; cues</h3><div class="bvnotes">' + esc(s.bv_notes) + '</div></div>';
-    h += '<div class="block"><h3>Lyrics</h3>' + (s.lyrics ? '<p class="lyrics">' + esc(s.lyrics) + '</p>' : '<p class="empty">Lyrics not added yet.</p>') + '</div>';
+    h += '<div class="block"><h3>Lyrics</h3>' + (s.lyrics ? partsLegend(s.lyrics) + '<p class="lyrics">' + lyricsHtml(s.lyrics) + '</p>' : '<p class="empty">Lyrics not added yet.</p>') + '</div>';
     h += '</div></div>';
 
     if (isAdmin()) h += adminSongPanel(s, mixTracks.concat(charts));
@@ -425,6 +437,7 @@
       '<label class="f" for="a-bpm">BPM<input id="a-bpm" type="number" inputmode="numeric" value="' + esc(s.bpm || "") + '"></label></div>' +
       '<label class="f" for="a-bv">BV parts &amp; cues<textarea id="a-bv">' + esc(s.bv_notes || "") + '</textarea></label>' +
       '<label class="f" for="a-lyrics">Lyrics<textarea id="a-lyrics" style="min-height:220px">' + esc(s.lyrics || "") + '</textarea></label>' +
+      '<p class="muted" style="margin:0;font-size:13px">Colour a part by wrapping it: {{u|words}} for unison, {{h|words}} for harmony, {{i|words}} for inversion.</p>' +
       '<div class="tp-row"><button class="btn primary" id="a-save">Save song details</button><span id="a-save-msg" class="muted"></span></div></div>' +
       '<hr style="border:0;border-top:1px solid var(--line);width:100%">' +
       '<div class="form"><h3 style="margin:0">Upload files</h3>' +
