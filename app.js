@@ -37,7 +37,7 @@
     return filename.replace(/\.[a-z0-9]+$/i, "").replace(/[_]+/g, " ").replace(/\s+/g, " ").trim();
   }
   function safeFile(filename) { return filename.toLowerCase().replace(/[^a-z0-9.\-]+/g, "-").replace(/-+/g, "-"); }
-  // Lyrics can carry part markers from the MD's colour-coded sheet:
+  // BV cues can carry part markers from the MD's colour-coded sheet:
   // {{u|text}} unison, {{h|text}} harmony, {{i|text}} inversion.
   var PARTS = { u: "Unison", h: "Harmony", i: "Inversion" };
   function plainLyrics(t) { return String(t || "").replace(/\{\{[uhi]\||\}\}/g, ""); }
@@ -251,8 +251,8 @@
       h += '<div class="block"><h3>Charts</h3><div class="charts">' + charts.map(function (c) { return '<button class="btn quiet" data-chart="' + esc(c.id) + '">' + esc(c.label) + ' ↗</button>'; }).join("") + '</div></div>';
     }
     h += '</div><div class="col-side">';
-    if (s.bv_notes) h += '<div class="block"><h3>BV parts &amp; cues</h3><div class="bvnotes">' + esc(s.bv_notes) + '</div></div>';
-    h += '<div class="block"><h3>Lyrics</h3>' + (s.lyrics ? partsLegend(s.lyrics) + '<p class="lyrics">' + lyricsHtml(s.lyrics) + '</p>' : '<p class="empty">Lyrics not added yet.</p>') + '</div>';
+    if (s.bv_notes) h += '<div class="block"><h3>BV parts &amp; cues</h3>' + partsLegend(s.bv_notes) + '<div class="bvnotes">' + lyricsHtml(s.bv_notes) + '</div></div>';
+    h += '<div class="block"><h3>Lyrics</h3>' + (s.lyrics ? '<p class="lyrics">' + esc(plainLyrics(s.lyrics)) + '</p>' : '<p class="empty">Lyrics not added yet.</p>') + '</div>';
     h += '</div></div>';
 
     if (isAdmin()) h += adminSongPanel(s, mixTracks.concat(charts));
@@ -435,9 +435,9 @@
       '<div class="form"><div class="two">' +
       '<label class="f" for="a-key">Key<input id="a-key" value="' + esc(s.key || "") + '" placeholder="e.g. Bb"></label>' +
       '<label class="f" for="a-bpm">BPM<input id="a-bpm" type="number" inputmode="numeric" value="' + esc(s.bpm || "") + '"></label></div>' +
-      '<label class="f" for="a-bv">BV parts &amp; cues<textarea id="a-bv">' + esc(s.bv_notes || "") + '</textarea></label>' +
+      '<label class="f" for="a-bv">BV parts &amp; cues<textarea id="a-bv" style="min-height:220px">' + esc(s.bv_notes || "") + '</textarea></label>' +
+      '<p class="muted" style="margin:0;font-size:13px">In the cues, colour a part by wrapping it: {{u|words}} for unison, {{h|words}} for harmony, {{i|words}} for inversion.</p>' +
       '<label class="f" for="a-lyrics">Lyrics<textarea id="a-lyrics" style="min-height:220px">' + esc(s.lyrics || "") + '</textarea></label>' +
-      '<p class="muted" style="margin:0;font-size:13px">Colour a part by wrapping it: {{u|words}} for unison, {{h|words}} for harmony, {{i|words}} for inversion.</p>' +
       '<div class="tp-row"><button class="btn primary" id="a-save">Save song details</button><span id="a-save-msg" class="muted"></span></div></div>' +
       '<hr style="border:0;border-top:1px solid var(--line);width:100%">' +
       '<div class="form"><h3 style="margin:0">Upload files</h3>' +

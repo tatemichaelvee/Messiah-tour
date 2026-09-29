@@ -157,7 +157,7 @@ input[type=range]{accent-color:var(--red);width:100%}
 .pt-i{background:#86EEF5}
 .legend{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 14px}
 .legend .pt{font:700 12px/1 var(--mono);letter-spacing:.05em;text-transform:uppercase;padding:7px 10px;border-radius:999px}
-.bvnotes{background:var(--red-soft);border-left:4px solid var(--red);border-radius:10px;padding:12px 14px;white-space:pre-wrap;max-width:62ch}
+.bvnotes{background:var(--red-soft);border-left:4px solid var(--red);border-radius:10px;padding:14px 16px;white-space:pre-wrap;font-size:16px;line-height:1.8;max-height:70vh;overflow:auto}
 
 /* forms and admin */
 .card{background:var(--surface);color:var(--fg);border:1px solid var(--line);border-radius:14px;padding:20px;display:grid;gap:14px}
