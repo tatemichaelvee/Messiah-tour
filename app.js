@@ -57,6 +57,22 @@
     if (!CFG.posterUrl) return "";
     return '<img class="' + cls + '" src="' + esc(CFG.posterUrl + (posterV ? "?v=" + posterV : "")) + '" alt="Messiah Tour Canada poster: Michael Mahendere and Direct Worship" onerror="this.remove()">';
   }
+  // Activity log: who signs in, opens songs and presses play. Only admins can read it.
+  function logEvent(event, songId) {
+    if (!S.session || !S.member) return;
+    sb.from("activity").insert({ event: event, song_id: songId || null }).then(function () {}, function () {});
+  }
+  function ago(ts) {
+    if (!ts) return "never";
+    var d = (Date.now() - new Date(ts).getTime()) / 1000;
+    if (d < 60) return "just now";
+    if (d < 3600) return Math.floor(d / 60) + " min ago";
+    if (d < 86400) return Math.floor(d / 3600) + " h ago";
+    if (d < 7 * 86400) return Math.floor(d / 86400) + " d ago";
+    return new Date(ts).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  }
+  function when(ts) { return ts ? new Date(ts).toLocaleString(undefined, { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : ""; }
+  var ICON_THUMB = '<svg viewBox="0 0 48 48" aria-hidden="true"><circle cx="24" cy="24" r="21" fill="none" stroke="currentColor" stroke-width="2.5"/><path d="M19.5 15.5v17l13.5-8.5z" fill="currentColor"/></svg>';
   var TITLE = 'Band <span>Portal</span>';
   var EYEBROW = 'Messiah Tour Canada 2026 · BVs &amp; Band';
 
@@ -85,9 +101,10 @@
     if (parts[0] === "song" && parts[1]) return { view: "song", id: decodeURIComponent(parts[1]) };
     if (parts[0] === "band") return { view: "band" };
     if (parts[0] === "upload") return { view: "upload" };
+    if (parts[0] === "activity") return { view: "activity" };
     return { view: "list" };
   }
-  window.addEventListener("hashchange", function () { S.editing = false; render(); window.scrollTo(0, 0); });
+  window.addEventListener("hashchange", function () { S.editing = false; if (!/^#\/song\//.test(location.hash)) S.loggedSong = null; render(); window.scrollTo(0, 0); });
 
   async function render() {
     if (mixer && route().view !== "song") { mixer.destroy(); mixer = null; }
@@ -97,6 +114,7 @@
     if (r.view === "song") return renderSong(r.id);
     if (r.view === "band" && isAdmin()) return renderBand();
     if (r.view === "upload" && isAdmin()) return renderBulk();
+    if (r.view === "activity" && isAdmin()) return renderActivity();
     return renderList();
   }
 
@@ -115,6 +133,7 @@
       '<button class="btn primary" type="submit" id="login-btn">' + (signup ? "Create my account" : "Sign in") + '</button>' +
       '<button class="linkbtn" type="button" id="mode">' + (signup ? "I already have a password" : "First time? Create your password") + '</button>' +
       '<p class="muted" style="margin:0;font-size:13px">Forgot your password? Message ' + esc(CFG.adminName) + ' to reset your account.</p>' +
+      '<p class="muted" style="margin:0;font-size:13px">Sign-ins, song views and plays are logged for the tour team.</p>' +
       '</form></div>';
     $("#mode").onclick = function () { S.loginMode = signup ? "signin" : "signup"; renderLogin(); };
     $("#login-form").onsubmit = async function (e) {
@@ -123,8 +142,10 @@
       if (!email || !pw) return renderLogin("Enter your email and password.");
       if (signup && pw.length < 8) return renderLogin("Use at least 8 characters for your password.");
       $("#login-btn").disabled = true;
+      S.justSignedIn = true;
       var res = signup ? await sb.auth.signUp({ email: email, password: pw }) : await sb.auth.signInWithPassword({ email: email, password: pw });
       if (res.error) {
+        S.justSignedIn = false;
         var m = res.error.message || "";
         if (signup && /database error|not on the/i.test(m)) return renderLogin("That email isn't on the band list. Ask " + CFG.adminName + " to add it, then try again.");
         if (/already registered|already exists/i.test(m)) { S.loginMode = "signin"; return renderLogin("You already have an account. Sign in with your password."); }
@@ -144,7 +165,7 @@
     return '<header class="top' + (full ? '' : ' compact') + '">' +
       '<div class="topline"><div class="eyebrow">' + EYEBROW + '</div>' +
       '<div class="who"><span>' + esc(S.member.name || S.session.user.email) + '</span>' +
-      (isAdmin() ? '<a href="#/band">Band list</a><a href="#/upload">Bulk upload</a>' : '') +
+      (isAdmin() ? '<a href="#/band">Band list</a><a href="#/upload">Bulk upload</a><a href="#/activity">Activity</a>' : '') +
       '<button class="linkbtn" id="signout">Sign out</button></div></div>' +
       (full ? '<div class="hero"><div class="hero-text">' +
       '<span class="hero-tag">Vialy Studios Inc &amp; Grateful Events</span>' +
@@ -199,7 +220,11 @@
       out += '<section class="artist"><div class="artist-head"><h2>' + esc(a.name) + '</h2><span class="sub">' + a.role + ' · ' + list.length + ' song' + (list.length > 1 ? "s" : "") + '</span></div><ol class="songs">';
       list.forEach(function (s) {
         var st = status(s), meta = [s.key ? esc(s.key) : "", s.bpm ? s.bpm + " bpm" : ""].filter(Boolean).join(" · ");
-        out += '<li><a class="row" href="#/song/' + encodeURIComponent(s.id) + '"><span class="num">' + String(all.indexOf(s) + 1).padStart(2, "0") + '</span><span class="name">' + esc(s.title) + '</span><span class="meta">' + meta + '</span><span class="pill ' + st.cls + '">' + st.text + '</span></a></li>';
+        out += '<li><a class="row" href="#/song/' + encodeURIComponent(s.id) + '" aria-label="Open ' + esc(s.title) + '">' +
+          '<span class="thumb">' + (CFG.posterUrl ? '<img src="' + esc(CFG.posterUrl + (posterV ? "?v=" + posterV : "")) + '" alt="" loading="lazy" onerror="this.remove()">' : '') +
+          '<span class="thumb-play">' + ICON_THUMB + '</span></span>' +
+          '<span class="title-block"><span class="name">' + esc(s.title) + '</span><span class="by"><span class="num">' + String(all.indexOf(s) + 1).padStart(2, "0") + '</span> ' + esc(a.name) + (meta ? ' · ' + meta : '') + '</span></span>' +
+          '<span class="pill ' + st.cls + '">' + st.text + '</span></a></li>';
       });
       out += '</ol></section>';
     });
@@ -263,8 +288,10 @@
     if (mixTracks.length) {
       if (mixer) mixer.destroy();
       mixer = new Mixer(mixTracks, stems.length > 0);
+      mixer.onFirstPlay = function () { logEvent("play", s.id); };
       mixer.start();
     }
+    if (S.loggedSong !== s.id) { S.loggedSong = s.id; logEvent("song", s.id); }
     if (isAdmin()) app.querySelectorAll("[data-dl]").forEach(function (b) { b.onclick = function () { openFile(b.dataset.dl, true); }; });
     app.querySelectorAll("[data-chart]").forEach(function (b) { b.onclick = function () { openFile(b.dataset.chart, false); }; });
     if (isAdmin()) bindAdminSong(s);
@@ -352,6 +379,7 @@
   Mixer.prototype.now = function () { var m = this.tracks[this.master()]; return m && m.el ? m.el.currentTime : 0; };
   Mixer.prototype.loopOn = function () { return this.loopA != null && this.loopB != null && this.loopB > this.loopA; };
   Mixer.prototype.play = async function () {
+    if (!this.playLogged) { this.playLogged = true; if (this.onFirstPlay) this.onFirstPlay(); }
     this.ensureGraph();
     if (this.ctx && this.ctx.state === "suspended") { try { await this.ctx.resume(); } catch (e) {} }
     var t0 = this.now();
@@ -554,6 +582,43 @@
     });
   }
 
+  // ---------- admin: activity ----------
+  var EVENT_TEXT = { sign_in: "signed in", visit: "opened the portal", song: "opened", play: "pressed play on" };
+  async function renderActivity() {
+    app.innerHTML = header() + '<main class="sheet"><a class="back" href="#/"><span class="arr" aria-hidden="true">←</span> All songs</a><p class="muted">Loading activity…</p></main>';
+    bindHeader();
+    var r = await Promise.all([
+      sb.rpc("admin_activity_summary"),
+      sb.from("activity").select("*").order("created_at", { ascending: false }).limit(150),
+      sb.from("band_members").select("email,name")
+    ]);
+    if (route().view !== "activity") return;
+    var names = {}; (r[2].data || []).forEach(function (m) { names[m.email] = m.name || m.email; });
+    var titles = {}; S.songs.forEach(function (s) { titles[s.id] = s.title; });
+    var sum = r[0].data || [], feed = r[1].data || [];
+    var err = r[0].error || r[1].error;
+    var h = header() + '<main class="sheet"><a class="back" href="#/"><span class="arr" aria-hidden="true">←</span> All songs</a>' +
+      '<div class="card admin"><span class="admin-tag">Admin</span><h2>Who’s using the portal</h2>' +
+      (err ? '<div class="msg err">' + esc(err.message) + '</div>' : '') +
+      '<div class="tablewrap"><table class="band act"><thead><tr><th>Name</th><th>Account</th><th>Last sign-in</th><th>Last active</th><th>Visits (7 days)</th><th>Songs opened</th><th>Plays</th></tr></thead><tbody>' +
+      sum.map(function (m) {
+        return '<tr><td><b>' + esc(m.name || m.email) + '</b><div class="meta">' + esc(m.email) + '</div></td>' +
+          '<td>' + (m.has_account ? '<span class="pill ok">Created</span>' : '<span class="pill none">Not yet</span>') + '</td>' +
+          '<td title="' + esc(when(m.last_sign_in)) + '">' + ago(m.last_sign_in) + '</td>' +
+          '<td title="' + esc(when(m.last_seen)) + '">' + ago(m.last_seen) + '</td>' +
+          '<td class="n">' + m.visits_7d + '</td><td class="n">' + m.songs_7d + '</td><td class="n">' + m.plays_7d + '</td></tr>';
+      }).join("") + '</tbody></table></div>' +
+      '<p class="muted" style="margin:0;font-size:13px">Last sign-in comes from the login system. Visits, songs opened and plays are counted from when activity logging started.</p></div>' +
+      '<div class="card admin" style="margin-top:20px"><span class="admin-tag">Admin</span><h2>Recent activity</h2>' +
+      (feed.length ? '<ul class="feed">' + feed.map(function (a) {
+        return '<li><span class="feed-time" title="' + esc(when(a.created_at)) + '">' + ago(a.created_at) + '</span><span><b>' + esc(names[a.email] || a.email) + '</b> ' + (EVENT_TEXT[a.event] || a.event) +
+          (a.song_id ? ' <a href="#/song/' + encodeURIComponent(a.song_id) + '">' + esc(titles[a.song_id] || a.song_id) + '</a>' : '') + '</span></li>';
+      }).join("") + '</ul>' : '<p class="empty">No activity yet. It appears here as people sign in and open songs.</p>') +
+      '</div></main>';
+    app.innerHTML = h;
+    bindHeader();
+  }
+
   // ---------- admin: bulk upload ----------
   // Pick many files at once; each is matched to a song by its file name
   // ("Bako rangu.m4a" -> Bako, "Declaration.m4a" -> My Declaration).
@@ -622,10 +687,14 @@
   // ---------- boot ----------
   async function onSession(session) {
     S.session = session;
-    if (!session) { S.member = null; render(); return; }
+    if (!session) { S.member = null; S.loggedVisit = false; render(); return; }
     try {
       await loadMember();
-      if (S.member) await loadAll();
+      if (S.member) {
+        await loadAll();
+        if (!S.loggedVisit) { S.loggedVisit = true; logEvent(S.justSignedIn ? "sign_in" : "visit"); }
+        S.justSignedIn = false;
+      }
     } catch (e) {
       app.innerHTML = '<div class="login card"><h2>Couldn’t load the library</h2><p>' + esc(e.message || e) + '</p><button class="btn" onclick="location.reload()">Try again</button></div>';
       return;
