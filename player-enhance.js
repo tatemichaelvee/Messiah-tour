@@ -22,6 +22,7 @@
   var floatRaf=0;
   var syncTimer=0;
   var lastRowCount=0;
+  var wrappedHash=false;
 
   window.Audio=function(src){
     var el = new NativeAudio(src);
@@ -123,7 +124,8 @@
 
   var nativeAdd=window.addEventListener.bind(window);
   window.addEventListener=function(type,listener,opts){
-    if(type==='hashchange' && typeof listener==='function'){
+    if(type==='hashchange' && typeof listener==='function' && !wrappedHash){
+      wrappedHash=true;
       return nativeAdd(type,function(ev){
         var had=snapshotCurrent();
         if(had)preserveDestroy=true;
