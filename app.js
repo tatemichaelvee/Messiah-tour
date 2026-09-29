@@ -205,7 +205,7 @@
     if (s.bpm) facts.push("<span>BPM <b>" + esc(s.bpm) + "</b></span>");
     facts.push("<span><b>" + esc(s.artist) + "</b></span>");
     var h = header() + '<main class="sheet">' +
-      '<a class="back" href="#/">← All songs</a>' +
+      '<a class="back" href="#/"><span class="arr" aria-hidden="true">←</span> All songs</a>' +
       '<div class="songhead"><h1>' + esc(s.title) + '</h1><div class="facts">' + facts.join("") + '</div></div>' +
       '<div class="songgrid"><div class="col-main">';
 
@@ -493,7 +493,7 @@
   async function renderBand(msg, kind) {
     var r = await sb.from("band_members").select("*").order("role").order("name");
     var rows = r.data || [];
-    app.innerHTML = header() + '<main class="sheet"><a class="back" href="#/">← All songs</a>' +
+    app.innerHTML = header() + '<main class="sheet"><a class="back" href="#/"><span class="arr" aria-hidden="true">←</span> All songs</a>' +
       '<div class="card admin"><span class="admin-tag">Admin</span><h2>Band list</h2>' +
       '<p class="muted" style="margin:0">Only these emails can create an account and open the music. Add someone, then send them the site link; they choose their own password on first visit.</p>' +
       '<form class="form" id="add-form"><div class="two"><label class="f" for="m-name">Name<input id="m-name" placeholder="e.g. Rudo (BV alto)"></label>' +
@@ -561,7 +561,7 @@
         '<td><select data-bulk="' + i + '" aria-label="Song for ' + esc(b.file.name) + '" style="width:100%;padding:6px 8px;border:1px solid var(--line);border-radius:6px;background:var(--surface)"><option value="">Skip this file</option>' + opts + '</select></td>' +
         '<td class="meta" id="bulk-st-' + i + '">' + esc(b.status || (b.file.size > MAX_UPLOAD ? "too big" : "")) + '</td></tr>';
     }).join("");
-    app.innerHTML = header() + '<main class="sheet"><a class="back" href="#/">← All songs</a>' +
+    app.innerHTML = header() + '<main class="sheet"><a class="back" href="#/"><span class="arr" aria-hidden="true">←</span> All songs</a>' +
       '<div class="card admin"><span class="admin-tag">Admin</span><h2>Bulk upload</h2>' +
       '<p class="muted" style="margin:0">Select many files at once. Each one is matched to a song by its file name; check the matches, fix any that are wrong, then upload.</p>' +
       '<div class="two"><label class="f" for="b-kind">Upload as<select id="b-kind">' +
