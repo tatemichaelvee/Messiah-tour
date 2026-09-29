@@ -29,17 +29,29 @@
 
   function inject(){
     if(document.getElementById('drive-import-card')) return;
-    var admin=document.querySelector('.card.admin');
-    if(!admin) return;
-    var tag=admin.querySelector('.admin-tag');
-    if(!tag) return;
+
+    // The portal only renders these links for admins, so use them as the
+    // reliable admin marker instead of depending on a specific admin card.
+    var adminLink=document.querySelector('a[href="#/band"]');
+    if(!adminLink) return;
+
+    var host=document.querySelector('main') || document.getElementById('app');
+    if(!host) return;
+
     var card=document.createElement('div');
-    card.className='card admin'; card.id='drive-import-card'; card.style.marginTop='20px';
+    card.className='card admin';
+    card.id='drive-import-card';
+    card.style.margin='20px 0';
     card.innerHTML='<span class="admin-tag">Admin</span><h2>Import Drive stems</h2><p class="muted" style="margin:0">Copies the shared Google Drive stems into Supabase so they work in the native Practice mixer with mute, solo, volume, speed and looping.</p><div class="tp-row" style="margin-top:12px"><button class="btn primary" id="drive-import-go">Import shared stems</button><span class="muted" id="drive-import-msg"></span></div>';
-    admin.parentNode.insertBefore(card,admin.nextSibling);
+
+    if(host.firstChild) host.insertBefore(card,host.firstChild);
+    else host.appendChild(card);
+
     var btn=document.getElementById('drive-import-go'),msg=document.getElementById('drive-import-msg');
     btn.onclick=function(){runAll(btn,msg);};
   }
+
   new MutationObserver(inject).observe(document.documentElement,{childList:true,subtree:true});
-  inject();
+  window.addEventListener('hashchange',function(){setTimeout(inject,0);});
+  setTimeout(inject,0);
 })();
