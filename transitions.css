@@ -1,0 +1,23 @@
+/* Messiah Tour Band Portal — page transitions (see transitions.js) */
+@keyframes pt-in-fwd {
+  from { opacity: 0; transform: translateX(24px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes pt-in-back {
+  from { opacity: 0; transform: translateX(-24px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes pt-in-fade {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: none; }
+}
+#app.pt-enter[data-pt="fwd"] { animation: pt-in-fwd .38s cubic-bezier(.2, .8, .2, 1) both; }
+#app.pt-enter[data-pt="back"] { animation: pt-in-back .38s cubic-bezier(.2, .8, .2, 1) both; }
+#app.pt-enter[data-pt="fade"] { animation: pt-in-fade .32s ease-out both; }
+
+/* keep the slide from causing a sideways scrollbar */
+html, body { overflow-x: clip; }
+
+@media (prefers-reduced-motion: reduce) {
+  #app.pt-enter { animation: none !important; }
+}
