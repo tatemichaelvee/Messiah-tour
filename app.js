@@ -620,66 +620,139 @@
   }
 
   // ---------- admin: bulk upload ----------
-  // Pick many files at once; each is matched to a song by its file name
-  // ("Bako rangu.m4a" -> Bako, "Declaration.m4a" -> My Declaration).
+  // Pick or drop whole folders (or loose files). Each file is matched to a song by
+  // its folder names first, then its file name ("Stems/02 Bako Rangu/Keys.wav" -> Bako).
   function norm(x) { return String(x || "").toLowerCase().replace(/\.[a-z0-9]+$/, "").replace(/[^a-z]/g, ""); }
-  function guessSong(filename) {
-    var f = norm(filename), best = null, bestLen = 0;
+  var ALIASES = { "chiuyai": ["chiuyamweya", "chiuya"], "huvepo-hwenyu": ["muhuvepo", "huvepo"], "tawanirwa-nyasha": ["tawanirwe", "tawanirwa"], "salt": ["saltoftheearth"], "armour-of-god": ["armorofgod"], "ndinobuda": ["pakaoma"], "guta": ["rehutiziro"] };
+  function matchName(name) {
+    var f = norm(name), best = null, bestLen = 0;
+    if (!f) return null;
     S.songs.forEach(function (s) {
-      var t = norm(s.title);
-      if (!t || !f) return;
-      if ((f.indexOf(t) > -1 || t.indexOf(f) > -1) && Math.min(t.length, f.length) > bestLen) { best = s; bestLen = Math.min(t.length, f.length); }
+      [norm(s.title)].concat(ALIASES[s.id] || []).forEach(function (t) {
+        if (!t) return;
+        if ((f.indexOf(t) > -1 || (f.length >= 5 && t.indexOf(f) > -1)) && Math.min(t.length, f.length) > bestLen) { best = s; bestLen = Math.min(t.length, f.length); }
+      });
     });
+    if (best && best.id === "messiah" && /tour|canada|stems|performance/.test(f)) return null; // "Messiah Tour Stems" is the parent folder, not the song
     return bestLen >= 3 ? best : null;
   }
-  var bulk = { files: [], kind: "guide" };
+  function guessSong(path) {
+    var parts = String(path).split("/"), file = parts.pop();
+    for (var i = parts.length - 1; i >= 0; i--) { var m = matchName(parts[i]); if (m) return m; }
+    return matchName(file);
+  }
+  var AUDIO_EXT = { mp3: "audio/mpeg", wav: "audio/wav", m4a: "audio/mp4", aac: "audio/aac", flac: "audio/flac", ogg: "audio/ogg", aif: "audio/aiff", aiff: "audio/aiff", mp4: "audio/mp4" };
+  var OTHER_EXT = { pdf: "application/pdf", png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg" };
+  function extOf(n) { var m = String(n).toLowerCase().match(/\.([a-z0-9]+)$/); return m ? m[1] : ""; }
+  function guessKind(name) {
+    var e = extOf(name);
+    if (OTHER_EXT[e]) return "chart";
+    if (/guide|full ?mix|mixdown|reference|\bref\b|master|bounce|cue mix/i.test(name)) return "guide";
+    return "stem";
+  }
+  function usable(name) { var e = extOf(name); return !!(AUDIO_EXT[e] || OTHER_EXT[e]) && !/^\._|^\./.test(String(name).split("/").pop()); }
+  var bulk = { files: [], note: "" };
+  function addFiles(list) {
+    var skipped = 0, added = 0;
+    list.forEach(function (x) {
+      var path = x.path || x.file.webkitRelativePath || x.file.name;
+      if (!usable(path)) { skipped++; return; }
+      if (bulk.files.some(function (b) { return b.path === path && b.file.size === x.file.size; })) return;
+      var g = guessSong(path);
+      bulk.files.push({ file: x.file, path: path, songId: g ? g.id : "", kind: guessKind(x.file.name), status: "" });
+      added++;
+    });
+    var unmatched = bulk.files.filter(function (b) { return !b.songId; }).length;
+    renderBulk(added + " file" + (added === 1 ? "" : "s") + " added" + (skipped ? " (" + skipped + " non-audio file" + (skipped === 1 ? "" : "s") + " ignored)" : "") + "." +
+      (unmatched ? " " + unmatched + " couldn’t be matched to a song; pick them below or leave them skipped." : " Everything is matched to a song."), unmatched ? "err" : "ok");
+  }
+  // walk dropped folders
+  function readEntry(entry, prefix) {
+    return new Promise(function (resolve) {
+      if (entry.isFile) { entry.file(function (f) { resolve([{ file: f, path: prefix + f.name }]); }, function () { resolve([]); }); return; }
+      if (!entry.isDirectory) { resolve([]); return; }
+      var reader = entry.createReader(), all = [];
+      (function next() {
+        reader.readEntries(function (ents) {
+          if (!ents.length) { Promise.all(all.map(function (e) { return readEntry(e, prefix + entry.name + "/"); })).then(function (r) { resolve([].concat.apply([], r)); }); return; }
+          all = all.concat(Array.from(ents)); next();
+        }, function () { resolve([]); });
+      })();
+    });
+  }
   function renderBulk(msg, kind) {
     var opts = S.songs.map(function (s) { return '<option value="' + esc(s.id) + '">' + esc(s.title) + ' (' + esc(s.artist.split(" ")[0]) + ')</option>'; }).join("");
-    var rows = bulk.files.map(function (b, i) {
-      return '<tr><td style="overflow-wrap:anywhere">' + esc(b.file.name) + '<div class="meta">' + mb(b.file.size) + '</div></td>' +
-        '<td><select data-bulk="' + i + '" aria-label="Song for ' + esc(b.file.name) + '" style="width:100%;padding:6px 8px;border:1px solid var(--line);border-radius:6px;background:var(--surface)"><option value="">Skip this file</option>' + opts + '</select></td>' +
-        '<td class="meta" id="bulk-st-' + i + '">' + esc(b.status || (b.file.size > MAX_UPLOAD ? "too big" : "")) + '</td></tr>';
+    var kinds = [["stem", "Stem"], ["guide", "Guide mix"], ["chart", "Chart"]];
+    var groups = {}, order = [];
+    bulk.files.forEach(function (b, i) { var k = b.songId || ""; if (!groups[k]) { groups[k] = []; order.push(k); } groups[k].push(i); });
+    order.sort(function (a, b) { if (!a) return 1; if (!b) return -1; var ia = S.songs.findIndex(function (s) { return s.id === a; }), ib = S.songs.findIndex(function (s) { return s.id === b; }); return ia - ib; });
+    var songTitle = function (id) { var s = S.songs.find(function (x) { return x.id === id; }); return s ? s.title : id; };
+    var total = bulk.files.length, big = bulk.files.filter(function (b) { return b.file.size > MAX_UPLOAD; }).length;
+    var table = order.map(function (k) {
+      var idx = groups[k];
+      return '<tbody class="bulk-group"><tr class="bulk-head"><th colspan="4">' + (k ? esc(songTitle(k)) + ' <span class="muted">· ' + idx.length + ' file' + (idx.length > 1 ? "s" : "") + '</span>' : '<span style="color:var(--bad)">Not matched · ' + idx.length + ' file' + (idx.length > 1 ? "s" : "") + '</span>') + '</th></tr>' +
+        idx.map(function (i) {
+          var b = bulk.files[i];
+          return '<tr><td style="overflow-wrap:anywhere">' + esc(b.file.name) + '<div class="meta" style="white-space:normal">' + esc(b.path.split("/").slice(0, -1).join(" / ")) + (b.path.indexOf("/") > -1 ? " · " : "") + mb(b.file.size) + '</div></td>' +
+            '<td><select data-bulk="' + i + '" aria-label="Song for ' + esc(b.file.name) + '" class="bulk-sel"><option value="">Skip this file</option>' + opts + '</select></td>' +
+            '<td><select data-bkind="' + i + '" aria-label="Type for ' + esc(b.file.name) + '" class="bulk-sel">' + kinds.map(function (x) { return '<option value="' + x[0] + '"' + (b.kind === x[0] ? " selected" : "") + '>' + x[1] + '</option>'; }).join("") + '</select></td>' +
+            '<td class="meta" id="bulk-st-' + i + '">' + esc(b.status || (b.file.size > MAX_UPLOAD ? "too big (max 50 MB)" : "")) + '</td></tr>';
+        }).join("") + '</tbody>';
     }).join("");
     app.innerHTML = header() + '<main class="sheet"><a class="back" href="#/"><span class="arr" aria-hidden="true">←</span> All songs</a>' +
       '<div class="card admin"><span class="admin-tag">Admin</span><h2>Bulk upload</h2>' +
-      '<p class="muted" style="margin:0">Select many files at once. Each one is matched to a song by its file name; check the matches, fix any that are wrong, then upload.</p>' +
-      '<div class="two"><label class="f" for="b-kind">Upload as<select id="b-kind">' +
-      [["guide", "Guide / full mix"], ["stem", "Stems"], ["chart", "Chord charts"]].map(function (k) { return '<option value="' + k[0] + '"' + (bulk.kind === k[0] ? " selected" : "") + '>' + k[1] + '</option>'; }).join("") + '</select></label>' +
-      '<label class="f" for="b-files">Files<input id="b-files" type="file" multiple accept="audio/*,.pdf,image/png,image/jpeg"></label></div>' +
+      '<p class="muted" style="margin:0">Drop whole stem folders here, or pick them. A folder named after a song (e.g. “Bako Rangu Stems”) sends every file inside it to that song. You can also drop one big folder that holds a folder per song. Check the matches, fix any, then upload.</p>' +
+      '<div class="dropzone" id="b-drop" tabindex="0"><strong>Drop folders or files here</strong><span class="muted">Audio (WAV, MP3, M4A, AIFF, FLAC), PDF charts and images · up to 50 MB each</span>' +
+      '<span class="tp-row" style="justify-content:center"><label class="btn primary" for="b-folder">Choose folder</label><label class="btn quiet" for="b-files">Choose files</label></span>' +
+      '<input id="b-folder" type="file" webkitdirectory directory multiple hidden><input id="b-files" type="file" multiple accept="audio/*,.aif,.aiff,.pdf,image/png,image/jpeg" hidden></div>' +
       (msg ? '<div class="msg ' + (kind || "err") + '">' + esc(msg) + '</div>' : '') +
-      (bulk.files.length ? '<div class="tablewrap"><table class="band"><thead><tr><th>File</th><th>Song</th><th>Status</th></tr></thead><tbody>' + rows + '</tbody></table></div>' +
-        '<div class="tp-row"><button class="btn primary" id="b-go">Upload ' + bulk.files.length + ' file' + (bulk.files.length > 1 ? "s" : "") + '</button><button class="btn quiet" id="b-clear">Clear</button></div>' : '') +
+      (total ? '<div class="tablewrap"><table class="band bulk"><thead><tr><th>File</th><th>Song</th><th>Type</th><th>Status</th></tr></thead>' + table + '</table></div>' +
+        (big ? '<p class="msg err" style="margin:0">' + big + ' file' + (big > 1 ? "s are" : " is") + ' over 50 MB and will be skipped. Export those stems as MP3 or M4A (320 kbps is plenty for practice) and add them again.</p>' : '') +
+        '<div class="tp-row"><button class="btn primary" id="b-go">Upload ' + bulk.files.filter(function (b) { return b.songId && b.status !== "done"; }).length + ' matched file(s)</button><button class="btn quiet" id="b-clear">Clear list</button><span class="muted" id="b-progress"></span></div>' : '') +
       '</div></main>';
     bindHeader();
-    bulk.files.forEach(function (b, i) { var sel = app.querySelector('[data-bulk="' + i + '"]'); if (sel) { sel.value = b.songId || ""; sel.onchange = function () { b.songId = sel.value; }; } });
-    $("#b-kind").onchange = function (e) { bulk.kind = e.target.value; };
-    $("#b-files").onchange = function (e) {
-      bulk.files = Array.from(e.target.files || []).map(function (f) { var g = guessSong(f.name); return { file: f, songId: g ? g.id : "", status: "" }; });
-      var unmatched = bulk.files.filter(function (b) { return !b.songId; }).length;
-      renderBulk(bulk.files.length + " file" + (bulk.files.length > 1 ? "s" : "") + " selected." + (unmatched ? " " + unmatched + " couldn't be matched; pick their songs below or leave them skipped." : " All matched to songs."), unmatched ? "err" : "ok");
+    bulk.files.forEach(function (b, i) {
+      var sel = app.querySelector('[data-bulk="' + i + '"]'); if (sel) { sel.value = b.songId || ""; sel.onchange = function () { b.songId = sel.value; renderBulk(); }; }
+      var ks = app.querySelector('[data-bkind="' + i + '"]'); if (ks) ks.onchange = function () { b.kind = ks.value; };
+    });
+    $("#b-folder").onchange = function (e) { addFiles(Array.from(e.target.files || []).map(function (f) { return { file: f, path: f.webkitRelativePath || f.name }; })); };
+    $("#b-files").onchange = function (e) { addFiles(Array.from(e.target.files || []).map(function (f) { return { file: f, path: f.name }; })); };
+    var dz = $("#b-drop");
+    dz.ondragover = function (e) { e.preventDefault(); dz.classList.add("over"); };
+    dz.ondragleave = function () { dz.classList.remove("over"); };
+    dz.ondrop = async function (e) {
+      e.preventDefault(); dz.classList.remove("over");
+      var items = Array.from(e.dataTransfer.items || []).map(function (it) { return it.webkitGetAsEntry ? it.webkitGetAsEntry() : null; }).filter(Boolean);
+      if (items.length) { var r = await Promise.all(items.map(function (en) { return readEntry(en, ""); })); addFiles([].concat.apply([], r)); }
+      else addFiles(Array.from(e.dataTransfer.files || []).map(function (f) { return { file: f, path: f.name }; }));
     };
     var clr = $("#b-clear"); if (clr) clr.onclick = function () { bulk.files = []; renderBulk(); };
     var go = $("#b-go"); if (go) go.onclick = async function () {
-      go.disabled = true;
-      var kindNow = bulk.kind, done = 0, failed = 0;
-      for (var i = 0; i < bulk.files.length; i++) {
-        var b = bulk.files[i], st = document.getElementById("bulk-st-" + i);
-        if (b.status === "done") continue;
-        if (!b.songId) { if (st) st.textContent = "skipped"; continue; }
-        if (b.file.size > MAX_UPLOAD) { b.status = "too big"; if (st) st.textContent = b.status; failed++; continue; }
-        if (st) st.textContent = "uploading…";
-        var path = b.songId + "/" + kindNow + "/" + Date.now() + "-" + safeFile(b.file.name);
-        var up = await sb.storage.from(BUCKET).upload(path, b.file, { contentType: b.file.type || undefined, upsert: false });
-        if (up.error) { b.status = "failed: " + up.error.message; if (st) st.textContent = b.status; failed++; continue; }
-        var song = S.songs.find(function (s) { return s.id === b.songId; });
-        var ins = await sb.from("tracks").insert({ song_id: b.songId, kind: kindNow, label: kindNow === "guide" ? "Guide mix" : prettyName(b.file.name), path: path, sort: tracksFor(b.songId, kindNow).length, size_bytes: b.file.size }).select().single();
-        if (ins.error) { b.status = "failed: " + ins.error.message; if (st) st.textContent = b.status; failed++; continue; }
-        S.tracks.push(ins.data); b.status = "done"; done++;
-        if (st) st.textContent = "done → " + (song ? song.title : "");
+      go.disabled = true; clr.disabled = true;
+      var queue = bulk.files.map(function (b, i) { return i; }).filter(function (i) { var b = bulk.files[i]; return b.songId && b.status !== "done"; });
+      var done = 0, failed = 0, skipped = 0, n = queue.length, prog = $("#b-progress");
+      var setSt = function (i, t) { bulk.files[i].status = t; var el = document.getElementById("bulk-st-" + i); if (el) el.textContent = t; };
+      async function one(i) {
+        var b = bulk.files[i];
+        if (b.file.size > MAX_UPLOAD) { setSt(i, "too big (max 50 MB)"); failed++; return; }
+        var label = prettyName(b.file.name);
+        if (S.tracks.some(function (t) { return t.song_id === b.songId && t.label === label && t.size_bytes === b.file.size; })) { setSt(i, "already on the song"); skipped++; return; }
+        setSt(i, "uploading…");
+        var e = extOf(b.file.name), type = b.file.type || AUDIO_EXT[e] || OTHER_EXT[e] || undefined;
+        if (type === "audio/x-m4a") type = "audio/mp4";
+        var path = b.songId + "/" + b.kind + "/" + Date.now() + "-" + Math.random().toString(36).slice(2, 6) + "-" + safeFile(b.file.name);
+        var up = await sb.storage.from(BUCKET).upload(path, b.file, { contentType: type, upsert: false });
+        if (up.error) { setSt(i, "failed: " + up.error.message); failed++; return; }
+        var ins = await sb.from("tracks").insert({ song_id: b.songId, kind: b.kind, label: b.kind === "guide" && !/guide|mix/i.test(label) ? "Guide mix" : label, path: path, sort: tracksFor(b.songId, b.kind).length, size_bytes: b.file.size }).select().single();
+        if (ins.error) { setSt(i, "failed: " + ins.error.message); failed++; return; }
+        S.tracks.push(ins.data); setSt(i, "done"); done++;
       }
-      go.disabled = false;
-      var m = "Uploaded " + done + " file" + (done === 1 ? "" : "s") + "." + (failed ? " " + failed + " failed; see the Status column." : "");
-      if (!failed) bulk.files = [];
+      var cursor = 0;
+      async function worker() { while (cursor < queue.length) { var i = queue[cursor++]; await one(i); if (prog) prog.textContent = (done + failed + skipped) + " of " + n + " processed…"; } }
+      await Promise.all([worker(), worker(), worker()]);
+      var songsTouched = {}; bulk.files.forEach(function (b) { if (b.status === "done") songsTouched[b.songId] = 1; });
+      var m = "Uploaded " + done + " file" + (done === 1 ? "" : "s") + " to " + Object.keys(songsTouched).length + " song" + (Object.keys(songsTouched).length === 1 ? "" : "s") + "." + (skipped ? " " + skipped + " were already there." : "") + (failed ? " " + failed + " failed; see the Status column." : "");
+      if (!failed) bulk.files = bulk.files.filter(function (b) { return b.status !== "done" && b.status !== "already on the song"; });
       renderBulk(m, failed ? "err" : "ok");
     };
   }
