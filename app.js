@@ -163,19 +163,20 @@
     if (other.length) groups.push({ key: "other", title: "Not on the setlist", short: "Other", sub: "Kept here in case they come back in", songs: other, other: true });
     return groups;
   }
-  function artistGroups() {
+  // onlySet: artist filter chips list only songs on the setlist (the rest live under "Other")
+  function artistGroups(onlySet) {
     var known = ARTISTS.map(function (a) { return a.name; });
     var extra = S.songs.map(function (s) { return s.artist; }).filter(function (n, i, arr) { return n && known.indexOf(n) < 0 && arr.indexOf(n) === i; });
     return ARTISTS.concat(extra.map(function (n) { return { name: n, short: n.split(" ")[0], role: "" }; })).map(function (a) {
-      return { key: a.name, title: a.name, short: a.short, sub: a.role, songs: S.songs.filter(function (s) { return s.artist === a.name; }).sort(function (x, y) { return (x.set_order || 0) - (y.set_order || 0); }) };
+      return { key: a.name, title: a.name, short: a.short, sub: a.role, songs: S.songs.filter(function (s) { return s.artist === a.name && (!onlySet || setOf(s)); }).sort(function (x, y) { return (x.set_order || 0) - (y.set_order || 0); }) };
     }).filter(function (g) { return g.songs.length; });
   }
   // what the list shows for the chosen filter chip
   function viewGroups() {
     if (S.view === "setlist") return setGroups().filter(function (g) { return !g.other; }).map(function (g) { g.setlist = true; return g; });
     if (S.view === "other") return setGroups().filter(function (g) { return g.other; });
-    var ag = artistGroups();
-    return S.view === "all" ? ag : ag.filter(function (g) { return g.key === S.view; });
+    if (S.view === "all") return artistGroups();
+    return artistGroups(true).filter(function (g) { return g.key === S.view; });
   }
   async function loadMember() {
     var email = S.session.user.email.toLowerCase();
@@ -283,7 +284,7 @@
   // ---------- library ----------
   function renderList() {
     var total = S.songs.length, ready = S.songs.filter(function (s) { return status(s).cls === "ok"; }).length;
-    var ag = artistGroups(), inSet = S.songs.filter(function (s) { return setOf(s); }).length, other = S.songs.length - inSet;
+    var ag = artistGroups(true), inSet = S.songs.filter(function (s) { return setOf(s); }).length, other = S.songs.length - inSet;
     var chips = [{ key: "all", label: "All " + total }]
       .concat(CHIP_ORDER.map(function (n) { return ag.find(function (g) { return g.key === n; }); }).filter(Boolean)
         .concat(ag.filter(function (g) { return CHIP_ORDER.indexOf(g.key) < 0; }))
