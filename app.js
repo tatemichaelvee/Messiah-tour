@@ -109,6 +109,7 @@
     if (paths.length) signedUrls(paths);
   }
   var ICON_PLAY = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4.5v15l13-7.5z" fill="currentColor"/></svg>';
+  var ICON_EXPAND = '<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
   var ICON_PAUSE = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 4h4.5v16H6zM13.5 4H18v16h-4.5z" fill="currentColor"/></svg>';
   var posterV = "";
   function poster(cls) {
@@ -165,6 +166,7 @@
   window.addEventListener("hashchange", function () { S.editing = false; if (!/^#\/song\//.test(location.hash)) S.loggedSong = null; render(); window.scrollTo(0, 0); });
 
   async function render() {
+    closeViewer();
     if (mixer && route().view !== "song") { mixer.destroy(); mixer = null; }
     if (!S.session) return renderLogin();
     if (!S.member) return renderNotListed();
@@ -344,7 +346,9 @@
     }
     h += '</div><div class="col-side">';
     if (s.bv_notes) h += '<div class="block"><h3>BV parts &amp; cues</h3>' + partsLegend(s.bv_notes) + '<div class="bvnotes">' + lyricsHtml(s.bv_notes) + '</div></div>';
-    h += '<div class="block"><h3>Lyrics</h3>' + (s.lyrics ? '<p class="lyrics">' + esc(plainLyrics(s.lyrics)) + '</p>' : '<p class="empty">Lyrics not added yet.</p>') + '</div>';
+    var sheet = pickSheet(charts);
+    h += '<div class="block"><h3>Lyrics</h3>' + (s.lyrics ? '<p class="lyrics">' + esc(plainLyrics(s.lyrics)) + '</p>' : '<p class="empty">Lyrics not added yet.</p>') +
+      (sheet ? '<button class="btn sheetbtn" data-sheet="' + esc(sheet.id) + '">' + ICON_EXPAND + ' Open Ruva’s coloured sheet</button>' : '') + '</div>';
     h += '</div></div>';
 
     if (isAdmin()) h += adminSongPanel(s, mixTracks.concat(charts));
@@ -362,8 +366,118 @@
     S.autoplay = null;
     if (S.loggedSong !== s.id) { S.loggedSong = s.id; logEvent("song", s.id); }
     if (isAdmin()) app.querySelectorAll("[data-dl]").forEach(function (b) { b.onclick = function () { openFile(b.dataset.dl, true); }; });
-    app.querySelectorAll("[data-chart]").forEach(function (b) { b.onclick = function () { openFile(b.dataset.chart, false); }; });
+    app.querySelectorAll("[data-chart],[data-sheet]").forEach(function (b) {
+      b.onclick = function () {
+        var t = S.tracks.find(function (x) { return x.id === (b.dataset.chart || b.dataset.sheet); });
+        if (t && (isPdf(t) || isImg(t))) openViewer(t, s.title); else openFile(b.dataset.chart, false);
+      };
+    });
     if (isAdmin()) bindAdminSong(s);
+  }
+
+  // ---------- full-screen sheet viewer ----------
+  // PDFs are drawn with PDF.js so every page shows on phones too (iOS only shows
+  // page 1 of a PDF in a frame). While it's open, a player bar at the bottom keeps
+  // the song's mixer in reach; if another song is playing in the floating player,
+  // that player stays on top instead.
+  var PDFJS = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/", pdfjsP = null, viewer = null;
+  function loadPdfjs() {
+    if (window.pdfjsLib) return Promise.resolve(window.pdfjsLib);
+    if (!pdfjsP) pdfjsP = new Promise(function (ok, bad) {
+      var sc = document.createElement("script"); sc.src = PDFJS + "pdf.min.js";
+      sc.onload = function () { window.pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS + "pdf.worker.min.js"; ok(window.pdfjsLib); };
+      sc.onerror = function () { pdfjsP = null; bad(new Error("The PDF viewer didn't load.")); };
+      document.head.appendChild(sc);
+    });
+    return pdfjsP;
+  }
+  function isPdf(t) { return /\.pdf$/i.test(t.path); }
+  function isImg(t) { return /\.(png|jpe?g|webp|gif)$/i.test(t.path); }
+  function pickSheet(charts) {
+    var v = charts.filter(function (c) { return isPdf(c) || isImg(c); });
+    return v.find(function (c) { return /ruva|lyric sheet/i.test(c.label + " " + c.path); }) || v.find(isPdf) || v[0] || null;
+  }
+  function closeViewer() {
+    if (!viewer) return;
+    var v = viewer; viewer = null; v.dead = true;
+    v.el.remove(); document.documentElement.classList.remove("pv-open");
+    document.removeEventListener("keydown", v.key); window.removeEventListener("resize", v.resize);
+    if (v.opener && v.opener.isConnected) v.opener.focus();
+  }
+  async function openViewer(t, songTitle) {
+    closeViewer();
+    var fl = document.getElementById("mt-float-player"), floatOn = !!(fl && !fl.hidden);
+    var hasMix = !!(mixer && document.getElementById("play")) && !floatOn;
+    var el = document.createElement("div");
+    el.className = "pv" + (floatOn ? " pv-float" : "");
+    el.setAttribute("role", "dialog"); el.setAttribute("aria-modal", "true"); el.setAttribute("aria-label", t.label);
+    el.innerHTML = '<div class="pv-bar"><strong class="pv-title">' + esc(t.label) + '</strong>' +
+      '<span class="pv-zoom"><button data-z="-1" aria-label="Zoom out">−</button><button data-z="0" aria-label="Fit to width">Fit</button><button data-z="1" aria-label="Zoom in">+</button></span>' +
+      '<button class="pv-close" aria-label="Close sheet">×</button></div>' +
+      '<div class="pv-body" tabindex="0"><div class="pv-pages"><p class="pv-msg">Opening the sheet…</p></div></div>' +
+      (hasMix ? '<div class="pv-player"><button class="pv-play" id="pv-play" aria-label="Play">' + ICON_PLAY + '</button>' +
+        '<div class="pv-info"><strong>' + esc(songTitle || "") + '</strong><span id="pv-clock">0:00 / 0:00</span></div>' +
+        '<input id="pv-scrub" type="range" min="0" max="1000" value="0" step="1" aria-label="Position"></div>' : '');
+    var v = viewer = { el: el, zoom: 1, dead: false, opener: document.activeElement, t: t };
+    document.body.appendChild(el);
+    document.documentElement.classList.add("pv-open");
+    v.key = function (e) { if (e.key === "Escape") closeViewer(); };
+    document.addEventListener("keydown", v.key);
+    var rt = 0;
+    v.resize = function () { clearTimeout(rt); rt = setTimeout(function () { if (!v.dead) drawSheet(v); }, 250); };
+    window.addEventListener("resize", v.resize);
+    el.querySelector(".pv-close").onclick = closeViewer;
+    el.querySelectorAll("[data-z]").forEach(function (b) {
+      b.onclick = function () { var z = +b.dataset.z; v.zoom = z === 0 ? 1 : Math.max(0.5, Math.min(3, v.zoom * (z > 0 ? 1.25 : 0.8))); drawSheet(v); };
+    });
+    el.querySelector(".pv-close").focus();
+    if (hasMix) {
+      el.querySelector("#pv-play").onclick = function () { var p = document.getElementById("play"); if (!p) return; if (p.disabled) { var c = document.getElementById("pv-clock"); if (c) c.textContent = "Still loading the audio…"; return; } p.click(); };
+      var sc = el.querySelector("#pv-scrub");
+      sc.addEventListener("input", function () { mixer.seeking = true; var c = document.getElementById("pv-clock"); if (c) c.textContent = fmt(sc.value / 1000 * mixer.duration) + " / " + fmt(mixer.duration); });
+      sc.addEventListener("change", function () { mixer.seeking = false; mixer.seek(sc.value / 1000 * mixer.duration); });
+      mixer.setIcon(); mixer.tick(true);
+    }
+    try {
+      var r = await signedUrls([t.path]);
+      if (r.error || !r.data[t.path]) throw new Error((r.error && r.error.message) || "No link for this file.");
+      if (v.dead) return;
+      v.url = r.data[t.path];
+      if (isPdf(t)) { var lib = await loadPdfjs(); v.doc = await lib.getDocument({ url: v.url }).promise; }
+      if (!v.dead) drawSheet(v);
+    } catch (e) {
+      if (!v.dead) el.querySelector(".pv-pages").innerHTML = '<p class="pv-msg">Couldn’t open the sheet: ' + esc(e.message || String(e)) + '</p>';
+    }
+  }
+  async function drawSheet(v) {
+    if (!v.url) return;
+    var body = v.el.querySelector(".pv-body"), box = v.el.querySelector(".pv-pages");
+    var w = Math.max(200, Math.min(body.clientWidth - 24, 1000) * v.zoom);
+    var pos = body.scrollHeight > body.clientHeight ? body.scrollTop / body.scrollHeight : 0;
+    var token = v.token = (v.token || 0) + 1;
+    if (!v.doc) { // image sheet
+      box.innerHTML = '<img class="pv-img" alt="' + esc(v.t.label) + '" src="' + esc(v.url) + '" style="width:' + Math.round(w) + 'px">';
+      return;
+    }
+    var dpr = Math.min(window.devicePixelRatio || 1, 2), canvases = [];
+    for (var i = 1; i <= v.doc.numPages; i++) {
+      var page = await v.doc.getPage(i);
+      if (v.dead || token !== v.token) return;
+      var base = page.getViewport({ scale: 1 }), cssScale = w / base.width, px = cssScale * dpr;
+      if (base.width * base.height * px * px > 16e6) px = Math.sqrt(16e6 / (base.width * base.height));
+      var vp = page.getViewport({ scale: px });
+      var c = document.createElement("canvas");
+      c.className = "pv-page"; c.width = Math.floor(vp.width); c.height = Math.floor(vp.height);
+      c.style.width = Math.round(w) + "px"; c.style.height = Math.round(base.height * cssScale) + "px";
+      c.setAttribute("aria-label", "Page " + i + " of " + v.doc.numPages);
+      await page.render({ canvasContext: c.getContext("2d"), viewport: vp }).promise;
+      if (v.dead || token !== v.token) return;
+      canvases.push(c);
+      if (i === 1) { box.innerHTML = ""; }
+      box.appendChild(c);
+      if (i === 1 && pos) body.scrollTop = pos * body.scrollHeight;
+    }
+    if (pos) body.scrollTop = pos * body.scrollHeight;
   }
 
   async function openFile(trackId, download) {
@@ -492,7 +606,10 @@
     this.tracks.forEach(function (t) { if (t.el && !t.broken) { t.el.currentTime = time; t.lastSeek = Date.now(); } });
     this.tick(true);
   };
-  Mixer.prototype.setIcon = function () { var p = document.getElementById("play"); if (p) { p.innerHTML = this.playing ? ICON_PAUSE : ICON_PLAY; p.setAttribute("aria-label", this.playing ? "Pause" : "Play"); } };
+  Mixer.prototype.setIcon = function () {
+    var self = this;
+    ["play", "pv-play"].forEach(function (id) { var p = document.getElementById(id); if (p) { p.innerHTML = self.playing ? ICON_PAUSE : ICON_PLAY; p.setAttribute("aria-label", self.playing ? "Pause" : "Play"); } });
+  };
   Mixer.prototype.loop = function () {
     var self = this;
     cancelAnimationFrame(this.raf);
@@ -542,10 +659,12 @@
     }, 200);
   };
   Mixer.prototype.tick = function (force) {
-    var c = document.getElementById("clock"), sc = document.getElementById("scrub");
-    var now = this.now();
-    if (c) c.textContent = fmt(now) + " / " + fmt(this.duration);
-    if (sc && !this.seeking && this.duration) sc.value = Math.round(now / this.duration * 1000);
+    var now = this.now(), self = this;
+    [["clock", "scrub"], ["pv-clock", "pv-scrub"]].forEach(function (ids) {
+      var c = document.getElementById(ids[0]), sc = document.getElementById(ids[1]);
+      if (c) c.textContent = fmt(now) + " / " + fmt(self.duration);
+      if (sc && !self.seeking && self.duration) sc.value = Math.round(now / self.duration * 1000);
+    });
     var li = document.getElementById("loopinfo");
     if (li && (force || true)) li.textContent = this.loopA != null ? ("A " + fmt(this.loopA) + (this.loopB != null ? " → B " + fmt(this.loopB) : "")) : "";
   };

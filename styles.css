@@ -254,3 +254,30 @@ table.act td.n{font:700 15px var(--mono);font-variant-numeric:tabular-nums}
 .who a:hover{transform:translateY(-2px)}
 .top .linkbtn:hover{color:#fff;opacity:.8}
 @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+
+/* Full-screen sheet viewer (Ruva's coloured lyric sheets and other charts) */
+.sheetbtn{margin-top:16px}
+.sheetbtn svg{flex:none}
+html.pv-open,html.pv-open body{overflow:hidden}
+.pv{position:fixed;inset:0;z-index:9000;display:flex;flex-direction:column;background:#1B0509;color:#fff}
+.pv-bar{display:flex;align-items:center;gap:10px;padding:calc(10px + env(safe-area-inset-top,0px)) max(14px,env(safe-area-inset-right)) 10px max(14px,env(safe-area-inset-left));background:var(--stage);border-bottom:1px solid rgba(255,255,255,.14)}
+.pv-title{flex:1;min-width:0;font:700 16px/1.2 var(--display);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pv-zoom{display:inline-flex;border:1px solid rgba(255,255,255,.35);border-radius:999px;overflow:hidden;flex:none}
+.pv-zoom button{background:none;border:0;color:#fff;font:700 15px var(--body);min-width:44px;height:40px;cursor:pointer}
+.pv-zoom button+button{border-left:1px solid rgba(255,255,255,.25)}
+.pv-zoom button:hover{background:rgba(255,255,255,.12)}
+.pv-close{flex:none;width:44px;height:44px;border-radius:50%;border:0;background:rgba(255,255,255,.14);color:#fff;font-size:26px;line-height:1;cursor:pointer}
+.pv-close:hover{background:rgba(255,255,255,.24)}
+.pv-body{flex:1;min-height:0;overflow:auto;-webkit-overflow-scrolling:touch;padding:16px 12px 24px;outline:none}
+.pv-pages{display:flex;flex-direction:column;align-items:center;gap:14px;width:max-content;min-width:100%}
+.pv-page,.pv-img{display:block;max-width:none;background:#fff;border-radius:4px;box-shadow:0 8px 30px rgba(0,0,0,.45)}
+.pv-msg{color:rgba(255,255,255,.8);margin:48px auto;text-align:center;max-width:40ch}
+.pv.pv-float .pv-body{padding-bottom:120px}
+.pv-player{display:grid;grid-template-columns:52px minmax(120px,260px) minmax(160px,1fr);gap:12px;align-items:center;padding:10px max(12px,env(safe-area-inset-right)) calc(10px + env(safe-area-inset-bottom,0px)) max(12px,env(safe-area-inset-left));background:rgba(31,7,13,.97);box-shadow:0 -10px 36px rgba(0,0,0,.3)}
+.pv-play{width:44px;height:44px;border-radius:50%;border:0;background:#fff;color:#7D0B20;display:grid;place-items:center;cursor:pointer}
+.pv-play svg{width:20px;height:20px}
+.pv-info{display:flex;flex-direction:column;gap:2px;min-width:0}
+.pv-info strong{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pv-info span{font:500 12px/1.2 var(--mono);opacity:.75}
+#pv-scrub{width:100%;accent-color:#fff}
+@media(max-width:760px){.pv-player{grid-template-columns:46px minmax(0,1fr);gap:8px}#pv-scrub{grid-column:1/-1}.pv-zoom button{min-width:38px}.pv-title{font-size:14px}}
