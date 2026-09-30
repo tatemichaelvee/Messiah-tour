@@ -385,15 +385,20 @@
         '<div class="tp-row"><button class="play" id="play" aria-label="Play" disabled>' + ICON_PLAY + '</button>' +
         '<span class="clock" id="clock">0:00 / 0:00</span>' +
         '<input class="scrub" id="scrub" type="range" min="0" max="1000" value="0" step="1" aria-label="Position"></div>' +
+        '<div class="wave-row"><canvas class="wave" id="wave" role="slider" tabindex="0" aria-valuemin="0" aria-label="Song waveform. Tap to jump, drag across a section to repeat it."></canvas><span class="wave-note" id="wave-note"></span></div>' +
         '<div class="tp-row"><span class="tp-label">Speed</span><span class="seg" id="speed">' +
         [0.75, 0.9, 1].map(function (v) { return '<button data-rate="' + v + '" aria-pressed="' + (v === 1) + '">' + (v === 1 ? "1×" : v + "×") + '</button>'; }).join("") + '</span>' +
-        '<span class="tp-label">Loop</span><span class="seg"><button id="loop-a">Set A</button><button id="loop-b">Set B</button><button id="loop-clear">Clear</button></span>' +
+        '<span class="tp-label">Loop</span><span class="seg"><button id="loop-rep" aria-pressed="false" title="Repeat the song, or the section you picked">⟲ Repeat</button><button id="loop-a">Set A</button><button id="loop-b">Set B</button><button id="loop-clear">Clear</button></span>' +
         '<span class="loopinfo" id="loopinfo"></span></div>' +
+        '<div class="tp-row part-row"><button type="button" class="part-btn" id="part-on" aria-pressed="false">★ My part louder</button>' +
+        '<label class="lvl"><span>My part</span><input type="range" id="part-lvl" min="0" max="1.5" step="0.01" value="1"></label>' +
+        '<label class="lvl"><span>Rest of the band</span><input type="range" id="band-lvl" min="0" max="1" step="0.01" value="0.35"></label>' +
+        '<span class="part-hint" id="part-hint"></span></div>' +
         '<div class="loadbar" id="loadbar">Loading audio…</div>' +
         '</div><div class="tracks" id="tracks">' +
         mixTracks.map(function (t, i) {
           return '<div class="trk" data-i="' + i + '"><span class="tname"><span class="tkind">' + (t.kind === "guide" ? "Guide mix" : "Stem") + '</span>' + esc(t.label) + '</span>' +
-            '<span class="ms"><button class="m" data-mute="' + i + '" aria-pressed="false" aria-label="Mute ' + esc(t.label) + '">M</button><button class="s" data-solo="' + i + '" aria-pressed="false" aria-label="Solo ' + esc(t.label) + '">S</button></span>' +
+            '<span class="ms"><button class="m" data-mute="' + i + '" aria-pressed="false" aria-label="Mute ' + esc(t.label) + '">M</button><button class="s" data-solo="' + i + '" aria-pressed="false" aria-label="Solo ' + esc(t.label) + '">S</button><button class="p" data-part="' + i + '" aria-pressed="false" aria-label="My part: ' + esc(t.label) + '" title="This is my part">★</button></span>' +
             '<input type="range" min="0" max="1" step="0.01" value="1" data-vol="' + i + '" aria-label="Volume ' + esc(t.label) + '">' +
             (isAdmin() ? '<button class="linkbtn dl" data-dl="' + esc(t.id) + '">Download</button>' : '<span class="dl" aria-hidden="true"></span>') + '</div>';
         }).join("") + '</div></div>';
@@ -992,6 +997,19 @@
     this.ctx = null; this.playing = false; this.rate = 1; this.loopA = null; this.loopB = null;
     this.duration = 0; this.raf = 0; this.lastSync = 0; this.dead = false; this.seeking = false;
     this.attached = false; this.loadMsg = "Loading audio…";
+    // repeat + "my part louder" (remembered per song in this browser)
+    this.repeat = false; this.wavesVer = 0; this._wcache = {};
+    var pref = partPrefs(song.id), ids = tracks.map(function (t) { return t.id; });
+    this.focus = {}; (pref.ids || []).forEach(function (id) { if (ids.indexOf(id) > -1) this.focus[id] = true; }, this);
+    this.focusOn = !!pref.on && Object.keys(this.focus).length > 0;
+    this.partLevel = pref.part != null ? pref.part : 1; this.bandLevel = pref.band != null ? pref.band : 0.35;
+  }
+  var PART_KEY = "mt-mypart-v1";
+  function partStore() { try { return JSON.parse(localStorage.getItem(PART_KEY) || "{}") || {}; } catch (e) { return {}; } }
+  function partPrefs(songId) {
+    var st = partStore(), p = st[songId] || {};
+    if (p.part == null && st._last) { p.part = st._last.part; p.band = st._last.band; }
+    return p;
   }
   // page elements, only while this mixer is the one shown on the song page
   Mixer.prototype.$ = function (id) { return this.attached ? document.getElementById(id) : null; };
@@ -1013,7 +1031,7 @@
         if (!t.retried && urlCache[t.meta.path]) { t.retried = true; delete urlCache[t.meta.path]; signedUrls([t.meta.path]).then(function (r2) { if (!self.dead && r2.data && r2.data[t.meta.path]) { el.src = r2.data[t.meta.path]; el.load(); } }); return; }
         self.setLoad("One track failed to load (" + t.meta.label + "). The rest will still play."); t.ready = true; t.broken = true; self.updateLoad();
       });
-      el.addEventListener("ended", function () { if (i === self.master() && !self.loopOn()) self.pause(); });
+      el.addEventListener("ended", function () { if (i !== self.master() || self.loopOn()) return; if (self.repeat && self.playing) self.play(); else self.pause(); });
       // one stem ran out of downloaded audio: hold everything until it catches up
       el.addEventListener("waiting", function () {
         if (!self.playing || t.broken || el.ended || Date.now() - (t.lastSeek || 0) < 1500) return;
@@ -1022,6 +1040,7 @@
       t.el = el; el.load();
     });
     this.applyGains();
+    loadPeaks(this);
   };
   // Connect this mixer to the song page that was just drawn (first open, or coming
   // back to a song that is still playing in the floating player).
@@ -1032,7 +1051,7 @@
     this.tracks.forEach(function (t, i) { var r = document.querySelector('[data-vol="' + i + '"]'); if (r) r.value = t.vol; });
     document.querySelectorAll("#speed [data-rate]").forEach(function (x) { x.setAttribute("aria-pressed", String(parseFloat(x.dataset.rate) === self.rate)); });
     var p = this.$("play"); if (p) p.disabled = !this.allReady();
-    this.setLoad(this.loadMsg); this.applyGains(); this.setIcon(); this.tick(true);
+    this.setLoad(this.loadMsg); this.applyGains(); this.setIcon(); this.partUI(); this.repeatUI(); this.waveNote(); this.tick(true);
     transportVisible = true;
     if (this.io) this.io.disconnect();
     var tr = document.querySelector(".transport");
@@ -1074,24 +1093,119 @@
     });
     this.applyGains();
   };
+  // what each track plays at: its own fader, times the "my part" balance when that's on
+  Mixer.prototype.level = function (t, anySolo) {
+    if (anySolo ? !t.solo : t.mute) return 0;
+    if (this.focusOn && !anySolo) return t.vol * (this.focus[t.meta.id] ? this.partLevel : this.bandLevel);
+    return t.vol;
+  };
   Mixer.prototype.applyGains = function () {
-    var anySolo = this.tracks.some(function (t) { return t.solo; });
+    var self = this, anySolo = this.tracks.some(function (t) { return t.solo; });
     var ctx = this.ctx, attached = this.attached;
     this.tracks.forEach(function (t, i) {
       var audible = anySolo ? t.solo : !t.mute;
-      var g = audible ? t.vol : 0;
+      var g = self.level(t, anySolo);
       if (t.gain && ctx) t.gain.gain.setTargetAtTime(g, ctx.currentTime, 0.015);
-      else if (t.el) { t.el.muted = !audible; t.el.volume = t.vol; }
+      else if (t.el) { t.el.muted = g === 0; t.el.volume = Math.min(1, g); }
       var row = attached && document.querySelector('.trk[data-i="' + i + '"]');
       if (row) {
         row.classList.toggle("silent", !audible);
+        row.classList.toggle("is-part", !!self.focus[t.meta.id]);
         row.querySelector("[data-mute]").setAttribute("aria-pressed", String(t.mute));
         row.querySelector("[data-solo]").setAttribute("aria-pressed", String(t.solo));
+        var pb = row.querySelector("[data-part]"); if (pb) pb.setAttribute("aria-pressed", String(!!self.focus[t.meta.id]));
       }
     });
+    this.drawWaves();
+  };
+  Mixer.prototype.savePart = function () {
+    var st = partStore();
+    st[this.songId] = { ids: Object.keys(this.focus), on: this.focusOn, part: this.partLevel, band: this.bandLevel };
+    st._last = { part: this.partLevel, band: this.bandLevel };
+    try { localStorage.setItem(PART_KEY, JSON.stringify(st)); } catch (e) {}
+  };
+  Mixer.prototype.partNames = function () { var self = this; return this.tracks.filter(function (t) { return self.focus[t.meta.id]; }).map(function (t) { return t.meta.label; }); };
+  Mixer.prototype.toggleFocus = function () {
+    if (!this.partNames().length) { this.focusOn = false; this.partUI(true); return false; }
+    this.focusOn = !this.focusOn; this.applyGains(); this.partUI(); this.savePart();
+    return true;
+  };
+  Mixer.prototype.partUI = function (nudge) {
+    var names = this.partNames();
+    var on = this.$("part-on"); if (on) on.setAttribute("aria-pressed", String(this.focusOn));
+    var pl = this.$("part-lvl"), bl = this.$("band-lvl");
+    if (pl) { pl.value = this.partLevel; pl.disabled = !this.focusOn; }
+    if (bl) { bl.value = this.bandLevel; bl.disabled = !this.focusOn; }
+    var h = this.$("part-hint");
+    if (h) {
+      h.textContent = names.length ? "My part: " + names.join(", ") : "Tap ★ next to your track below to mark your part.";
+      if (nudge) { h.classList.remove("flash"); void h.offsetWidth; h.classList.add("flash"); }
+    }
+    var fp = document.getElementById("mt-float-part");
+    if (fp && this === floatTarget()) { fp.setAttribute("aria-pressed", String(this.focusOn)); fp.title = names.length ? (this.focusOn ? "My part louder: on" : "Make my part louder") : "Mark your part with ★ on the song page"; }
+  };
+  // ---- repeat ----
+  Mixer.prototype.repeatUI = function () {
+    var b = this.$("loop-rep"); if (b) b.setAttribute("aria-pressed", String(this.repeat));
+    var fr = document.getElementById("mt-float-rep");
+    if (fr && this === floatTarget()) { fr.setAttribute("aria-pressed", String(this.repeat)); fr.title = this.repeat ? (this.loopOn() ? "Repeating your section" : "Repeating the song") : "Repeat"; }
+    this.tick(true);
+  };
+  Mixer.prototype.setRegion = function (a, b) {
+    this.loopA = a; this.loopB = b; this.repeat = true;
+    this.seek(a); this.repeatUI();
+  };
+  // ---- waveform ----
+  // Loudness per column across the tracks you can hear (so muting a stem changes the shape),
+  // with your part drawn on top in gold.
+  Mixer.prototype.waveCols = function (n) {
+    var self = this, anySolo = this.tracks.some(function (t) { return t.solo; });
+    var key = n + "|" + this.wavesVer + "|" + Math.round(this.duration) + "|" + this.tracks.map(function (t) { return self.level(t, anySolo).toFixed(2) + (self.focus[t.meta.id] ? "p" : ""); }).join(",");
+    if (key in this._wcache) return this._wcache[key];
+    var have = this.tracks.filter(function (t) { return peaksCache[t.meta.id]; }), cols = null;
+    if (have.length && this.duration) {
+      var band = new Float32Array(n), part = have.some(function (t) { return self.focus[t.meta.id]; }) ? new Float32Array(n) : null, c;
+      have.forEach(function (t) {
+        var pk = peaksCache[t.meta.id], d = pk.dur || (t.el && t.el.duration) || self.duration, g = self.level(t, anySolo), isPart = self.focus[t.meta.id];
+        if (!g) return;
+        for (c = 0; c < n; c++) {
+          var f = (c + 0.5) / n * self.duration / d; if (f >= 1) continue;
+          var a = pk.q[Math.floor(f * pk.q.length)] * g;
+          band[c] += a * a; if (isPart) part[c] += a * a;
+        }
+      });
+      var max = 0.02;
+      for (c = 0; c < n; c++) { band[c] = Math.sqrt(band[c]); if (band[c] > max) max = band[c]; if (part) part[c] = Math.sqrt(part[c]); }
+      for (c = 0; c < n; c++) { band[c] = Math.sqrt(band[c] / max); if (part) part[c] = Math.sqrt(part[c] / max); }
+      cols = { band: band, part: part };
+    }
+    var ks = Object.keys(this._wcache); if (ks.length > 6) this._wcache = {};
+    this._wcache[key] = cols;
+    return cols;
+  };
+  Mixer.prototype.drawWaves = function () {
+    if (!window.MTWave) return;
+    var cans = [], self = this, dur = this.duration || 0, now = this.now();
+    var mc = this.$("wave"); if (mc) cans.push(mc);
+    var fp = document.getElementById("mt-float-player"), fc = document.getElementById("mt-fwave");
+    if (fc && fp && !fp.hidden && this === floatTarget()) cans.push(fc);
+    cans.forEach(function (cv) {
+      var n = Math.max(40, Math.min(300, Math.round(cv.clientWidth / 4)));
+      MTWave.draw(cv, { cols: self.waveCols(n), progress: dur ? Math.min(1, now / dur) : 0,
+        loopA: self.loopA != null && dur ? self.loopA / dur : null, loopB: self.loopB != null && dur ? self.loopB / dur : null });
+      cv.setAttribute("aria-valuemax", String(Math.round(dur))); cv.setAttribute("aria-valuenow", String(Math.round(now))); cv.setAttribute("aria-valuetext", fmt(now) + " of " + fmt(dur));
+    });
+  };
+  Mixer.prototype.waveNote = function () {
+    var el = this.$("wave-note"); if (!el) return;
+    var n = this.tracks.length, have = 0, busy = 0;
+    this.tracks.forEach(function (t) { if (peaksCache[t.meta.id]) have++; if (peaksBuilding[t.meta.id]) busy++; });
+    el.textContent = busy ? "Drawing the waveform… " + have + " of " + n + " tracks done" :
+      !have ? (isAdmin() ? "No waveform yet. Draw them all from Bulk upload (on a computer)." : "The waveform for this song is on its way.") :
+      (have < n ? "Waveform covers " + have + " of " + n + " tracks. " : "") + "Tap to jump. Drag across a section to repeat it.";
   };
   Mixer.prototype.now = function () { var m = this.tracks[this.master()]; return m && m.el ? m.el.currentTime : 0; };
-  Mixer.prototype.loopOn = function () { return this.loopA != null && this.loopB != null && this.loopB > this.loopA; };
+  Mixer.prototype.loopOn = function () { return this.repeat && this.loopA != null && this.loopB != null && this.loopB > this.loopA; };
   Mixer.prototype.play = async function (auto) {
     if (this.dead) return;
     var pb = this.$("play"); if (pb) pb.classList.remove("nudge");
@@ -1215,8 +1329,9 @@
     if (c && !this.seeking) c.textContent = fmt(now) + " / " + fmt(this.duration);
     if (sc && !this.seeking && this.duration) sc.value = Math.round(now / this.duration * 1000);
     var li = this.$("loopinfo");
-    if (li) li.textContent = this.loopA != null ? ("A " + fmt(this.loopA) + (this.loopB != null ? " → B " + fmt(this.loopB) : "")) : "";
+    if (li) li.textContent = this.loopA != null ? ((this.loopOn() ? "Repeating " : "") + fmt(this.loopA) + (this.loopB != null ? " → " + fmt(this.loopB) : " → set B")) : (this.repeat ? "Repeating the whole song" : "");
     if (this === floatTarget()) floatTime(this);
+    this.drawWaves();
   };
   Mixer.prototype.bind = function () {
     var self = this;
@@ -1232,8 +1347,21 @@
       };
     });
     document.getElementById("loop-a").onclick = function () { self.loopA = self.now(); if (self.loopB != null && self.loopB <= self.loopA) self.loopB = null; self.tick(true); };
-    document.getElementById("loop-b").onclick = function () { var n = self.now(); if (self.loopA == null || n <= self.loopA) return; self.loopB = n; self.seek(self.loopA); };
-    document.getElementById("loop-clear").onclick = function () { self.loopA = self.loopB = null; self.tick(true); };
+    document.getElementById("loop-b").onclick = function () { var n = self.now(); if (self.loopA == null || n <= self.loopA) return; self.setRegion(self.loopA, n); };
+    document.getElementById("loop-clear").onclick = function () { self.loopA = self.loopB = null; self.repeat = false; self.repeatUI(); };
+    document.getElementById("loop-rep").onclick = function () { self.repeat = !self.repeat; self.repeatUI(); };
+    document.getElementById("part-on").onclick = function () { self.toggleFocus(); };
+    document.getElementById("part-lvl").oninput = function () { self.partLevel = parseFloat(this.value); self.applyGains(); self.savePart(); };
+    document.getElementById("band-lvl").oninput = function () { self.bandLevel = parseFloat(this.value); self.applyGains(); self.savePart(); };
+    document.querySelectorAll("[data-part]").forEach(function (b) {
+      b.onclick = function () {
+        var id = self.tracks[+b.dataset.part].meta.id;
+        if (self.focus[id]) delete self.focus[id]; else { self.focus[id] = true; self.focusOn = true; }
+        if (!self.partNames().length) self.focusOn = false;
+        self.applyGains(); self.partUI(); self.savePart();
+      };
+    });
+    bindWave(document.getElementById("wave"), function () { return self; });
     document.querySelectorAll("[data-mute]").forEach(function (b) { b.onclick = function () { var t = self.tracks[+b.dataset.mute]; t.mute = !t.mute; self.applyGains(); }; });
     document.querySelectorAll("[data-solo]").forEach(function (b) { b.onclick = function () { var t = self.tracks[+b.dataset.solo]; t.solo = !t.solo; self.applyGains(); }; });
     document.querySelectorAll("[data-vol]").forEach(function (r) { r.oninput = function () { self.tracks[+r.dataset.vol].vol = parseFloat(r.value); self.applyGains(); }; });
@@ -1263,8 +1391,10 @@
     p.id = "mt-float-player"; p.hidden = true; p.setAttribute("aria-label", "Now playing");
     p.innerHTML = '<div class="mt-float-main"><button class="mt-float-play" aria-label="Play">' + ICON_PLAY + '</button>' +
       '<div class="mt-float-info"><strong id="mt-float-title">Practice mixer</strong><span id="mt-float-clock">0:00 / 0:00</span></div>' +
-      '<input id="mt-float-scrub" type="range" min="0" max="1000" value="0" step="1" aria-label="Position">' +
-      '<a id="mt-float-back" href="#/">Open mixer</a><button id="mt-float-close" aria-label="Stop and close player">×</button></div>';
+      '<div class="mt-float-wave"><canvas id="mt-fwave" role="slider" tabindex="0" aria-valuemin="0" aria-label="Song waveform. Tap to jump, drag across a section to repeat it."></canvas></div>' +
+      '<a id="mt-float-back" href="#/">Open mixer</a>' +
+      '<span class="mt-float-tools"><button id="mt-float-part" type="button" aria-pressed="false" aria-label="My part louder">★</button><button id="mt-float-rep" type="button" aria-pressed="false" aria-label="Repeat">⟲</button></span>' +
+      '<button id="mt-float-close" aria-label="Stop and close player">×</button></div>';
     document.body.appendChild(p);
     p.querySelector(".mt-float-play").onclick = function () {
       var m = floatTarget(); if (!m) return;
@@ -1276,18 +1406,18 @@
       m.pause();
       if (m.attached) { floatDismissed = true; floatUpdate(); } else m.destroy();
     };
-    var sc = p.querySelector("#mt-float-scrub");
-    sc.addEventListener("input", function () { var m = floatTarget(); if (!m) return; m.seeking = true; p.querySelector("#mt-float-clock").textContent = fmt(sc.value / 1000 * m.duration) + " / " + fmt(m.duration); });
-    sc.addEventListener("change", function () { var m = floatTarget(); if (!m) return; m.seeking = false; m.seek(sc.value / 1000 * m.duration); });
+    p.querySelector("#mt-float-rep").onclick = function () { var m = floatTarget(); if (!m) return; m.repeat = !m.repeat; m.repeatUI(); };
+    p.querySelector("#mt-float-part").onclick = function () {
+      var m = floatTarget(); if (!m) return;
+      if (!m.toggleFocus()) { var c = p.querySelector("#mt-float-clock"); c.textContent = "Tap ★ next to your track on the song page first"; setTimeout(function () { if (floatTarget()) floatTime(floatTarget()); }, 3000); }
+    };
+    bindWave(p.querySelector("#mt-fwave"), floatTarget);
     return p;
   }
   function floatTime(m) {
     var p = document.getElementById("mt-float-player"); if (!p || p.hidden) return;
     var now = m.now();
-    if (!m.seeking) {
-      p.querySelector("#mt-float-clock").textContent = fmt(now) + " / " + fmt(m.duration);
-      if (m.duration) p.querySelector("#mt-float-scrub").value = Math.round(now / m.duration * 1000);
-    }
+    if (!m.seeking) p.querySelector("#mt-float-clock").textContent = fmt(now) + " / " + fmt(m.duration);
   }
   function floatUpdate() {
     trackPresence();
@@ -1304,6 +1434,106 @@
     var b = p.querySelector(".mt-float-play");
     b.innerHTML = m.playing ? ICON_PAUSE : ICON_PLAY; b.setAttribute("aria-label", m.playing ? "Pause" : "Play");
     floatTime(m);
+    m.partUI(); p.querySelector("#mt-float-rep").setAttribute("aria-pressed", String(m.repeat));
+    m.drawWaves();
+  }
+  // Waveform as a scrubber: tap to jump, drag across to pick a section to repeat,
+  // arrow keys move 5 s (15 s with Shift).
+  function bindWave(cv, getM) {
+    if (!cv) return;
+    var down = null;
+    function at(e) { var r = cv.getBoundingClientRect(), m = getM(); return m && m.duration ? Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)) * m.duration : 0; }
+    cv.addEventListener("pointerdown", function (e) {
+      var m = getM(); if (!m || !m.duration) return;
+      down = { x: e.clientX, t: at(e), sel: false, a: m.loopA, b: m.loopB };
+      try { cv.setPointerCapture(e.pointerId); } catch (x) {}
+    });
+    cv.addEventListener("pointermove", function (e) {
+      var m = getM(); if (!down || !m) return;
+      if (!down.sel && Math.abs(e.clientX - down.x) > 8) down.sel = true;
+      if (down.sel) { var b = at(e); m.loopA = Math.min(down.t, b); m.loopB = Math.max(down.t, b); m.drawWaves(); }
+    });
+    cv.addEventListener("pointerup", function (e) {
+      var m = getM(), d = down; down = null; if (!d || !m) return;
+      if (d.sel && m.loopB - m.loopA >= 1) m.setRegion(m.loopA, m.loopB);
+      else {
+        if (d.sel) { m.loopA = d.a; m.loopB = d.b; }
+        var t = at(e);
+        // tapping outside the section you're repeating lets go of it
+        if (m.loopOn() && (t < m.loopA || t > m.loopB)) { m.loopA = m.loopB = null; m.repeat = false; m.repeatUI(); }
+        m.seek(t);
+      }
+    });
+    cv.addEventListener("pointercancel", function () { var m = getM(); if (down && m && down.sel) { m.loopA = down.a; m.loopB = down.b; m.drawWaves(); } down = null; });
+    cv.addEventListener("keydown", function (e) {
+      var m = getM(); if (!m) return;
+      var step = e.shiftKey ? 15 : 5;
+      if (e.key === "ArrowRight") m.seek(m.now() + step);
+      else if (e.key === "ArrowLeft") m.seek(m.now() - step);
+      else if (e.key === "Home") m.seek(0);
+      else if (e.key === " " || e.key === "Enter") m.toggle();
+      else return;
+      e.preventDefault();
+    });
+  }
+  var waveResize = 0;
+  window.addEventListener("resize", function () { clearTimeout(waveResize); waveResize = setTimeout(function () { [active, mixer].forEach(function (m) { if (m && !m.dead) m.drawWaves(); }); }, 120); });
+
+  // ---------- waveform data ----------
+  // Each track's shape (300 loudness points) is measured once and saved for everyone.
+  // Admins' computers measure missing ones in the background; new uploads are measured
+  // from the file on your computer as they go up.
+  var peaksCache = {}, peaksBuilding = {}, peakQueue = Promise.resolve();
+  function finePointer() { return !window.matchMedia || window.matchMedia("(pointer:fine)").matches; }
+  function peaksChanged() { [active, mixer].forEach(function (m) { if (m && !m.dead) { m.wavesVer++; m.waveNote(); m.tick(true); } }); }
+  async function loadPeaks(m) {
+    if (!window.MTWave) return;
+    var ids = m.tracks.map(function (t) { return t.meta.id; }).filter(function (id) { return !(id in peaksCache); });
+    if (ids.length) {
+      var r = await sb.from("track_peaks").select("track_id,peaks,duration").in("track_id", ids);
+      (r.data || []).forEach(function (p) { try { peaksCache[p.track_id] = { q: MTWave.decodePeaks(p.peaks), dur: p.duration }; } catch (e) {} });
+      if (!r.error) ids.forEach(function (id) { if (!(id in peaksCache)) peaksCache[id] = null; });
+    }
+    if (m.dead) return;
+    m.wavesVer++; m.waveNote(); m.tick(true);
+    var missing = m.tracks.map(function (t) { return t.meta; }).filter(function (t) { return !peaksCache[t.id]; });
+    if (missing.length && isAdmin() && finePointer()) buildPeaks(missing);
+  }
+  async function savePeaks(t, res) {
+    var txt = MTWave.encode(res.peaks);
+    var r = await sb.from("track_peaks").upsert({ track_id: t.id, peaks: txt, duration: res.duration, method: res.method });
+    if (r.error) throw r.error;
+    peaksCache[t.id] = { q: MTWave.decodePeaks(txt), dur: res.duration };
+  }
+  function buildPeaks(list, onEach) {
+    if (!window.MTWave) return Promise.resolve({ ok: 0, fail: list.length });
+    list = list.filter(function (t) { return t.kind !== "chart" && !peaksCache[t.id] && !peaksBuilding[t.id]; });
+    list.forEach(function (t) { peaksBuilding[t.id] = true; });
+    peaksChanged();
+    var job = peakQueue.then(async function () {
+      var ok = 0, fail = 0;
+      for (var i = 0; i < list.length; i++) {
+        var t = list[i];
+        try {
+          var u = await signedUrls([t.path]);
+          if (u.error || !u.data[t.path]) throw new Error("No link for this file");
+          await savePeaks(t, await MTWave.sample(MTWave.urlReader(u.data[t.path], t.size_bytes, t.path)));
+          ok++;
+        } catch (e) { fail++; if (window.console) console.warn("Waveform failed for " + t.label, e); }
+        delete peaksBuilding[t.id];
+        if (onEach) onEach(ok, fail, list.length);
+        peaksChanged();
+      }
+      return { ok: ok, fail: fail };
+    });
+    peakQueue = job.catch(function () {});
+    return job;
+  }
+  function peaksFromFile(track, file) {
+    if (!window.MTWave || track.kind === "chart") return;
+    peaksBuilding[track.id] = true;
+    peakQueue = peakQueue.then(function () { return MTWave.sample(MTWave.fileReader(file)).then(function (res) { return savePeaks(track, res); }); })
+      .catch(function () {}).then(function () { delete peaksBuilding[track.id]; peaksChanged(); });
   }
   function mediaSession(m) {
     if (!("mediaSession" in navigator)) return;
@@ -1373,6 +1603,7 @@
         var ins = await sb.from("tracks").insert({ song_id: s.id, kind: kind, label: prettyName(f.name), path: path, sort: base + i, size_bytes: f.size }).select().single();
         if (ins.error) { li.lastChild.textContent = "saved file but not listed: " + ins.error.message; continue; }
         S.tracks.push(ins.data); uploaded++;
+        peaksFromFile(ins.data, f);
         li.lastChild.textContent = "done";
       }
       $("#a-upload").disabled = false;
@@ -1613,8 +1844,10 @@
       (total ? '<div class="tablewrap"><table class="band bulk"><thead><tr><th>File</th><th>Song</th><th>Type</th><th>Status</th></tr></thead>' + table + '</table></div>' +
         (big ? '<p class="msg err" style="margin:0">' + big + ' file' + (big > 1 ? "s are" : " is") + ' over 1 GB and will be skipped. Export those as MP3 or M4A and add them again.</p>' : '') +
         '<div class="tp-row"><button class="btn primary" id="b-go">Upload ' + bulk.files.filter(function (b) { return b.songId && b.status !== "done"; }).length + ' matched file(s)</button><button class="btn quiet" id="b-clear">Clear list</button><span class="muted" id="b-progress"></span></div>' : '') +
-      '</div></main>';
+      '</div>' +
+      '<div class="card admin" style="margin-top:20px"><span class="admin-tag">Admin</span><h2>Waveforms</h2><div id="wave-admin"><p class="muted" style="margin:0">Checking…</p></div></div></main>';
     bindHeader();
+    waveAdmin();
     bulk.files.forEach(function (b, i) {
       var sel = app.querySelector('[data-bulk="' + i + '"]'); if (sel) { sel.value = b.songId || ""; sel.onchange = function () { b.songId = sel.value; renderBulk(); }; }
       var ks = app.querySelector('[data-bkind="' + i + '"]'); if (ks) ks.onchange = function () { b.kind = ks.value; };
@@ -1649,7 +1882,7 @@
         if (up.error) { setSt(i, "failed: " + up.error.message); failed++; return; }
         var ins = await sb.from("tracks").insert({ song_id: b.songId, kind: b.kind, label: b.kind === "guide" && !/guide|mix/i.test(label) ? "Guide mix" : label, path: path, sort: tracksFor(b.songId, b.kind).length, size_bytes: b.file.size }).select().single();
         if (ins.error) { setSt(i, "failed: " + ins.error.message); failed++; return; }
-        S.tracks.push(ins.data); setSt(i, "done"); done++;
+        S.tracks.push(ins.data); peaksFromFile(ins.data, b.file); setSt(i, "done"); done++;
       }
       var cursor = 0;
       async function worker() { while (cursor < queue.length) { var i = queue[cursor++]; await one(i); if (prog) prog.textContent = (done + failed + skipped) + " of " + n + " processed…"; } }
@@ -1658,6 +1891,32 @@
       var m = "Uploaded " + done + " file" + (done === 1 ? "" : "s") + " to " + Object.keys(songsTouched).length + " song" + (Object.keys(songsTouched).length === 1 ? "" : "s") + "." + (skipped ? " " + skipped + " were already there." : "") + (failed ? " " + failed + " failed; see the Status column." : "");
       if (!failed) bulk.files = bulk.files.filter(function (b) { return b.status !== "done" && b.status !== "already on the song"; });
       renderBulk(m, failed ? "err" : "ok");
+    };
+  }
+
+  // Waveform status for the whole library, with a button to draw the missing ones.
+  var WAVEJOB = null;
+  async function waveAdmin() {
+    var box = document.getElementById("wave-admin"); if (!box) return;
+    var audio = S.tracks.filter(function (t) { return t.kind !== "chart"; });
+    var r = await sb.from("track_peaks").select("track_id");
+    var have = {}; (r.data || []).forEach(function (p) { have[p.track_id] = 1; });
+    var missing = audio.filter(function (t) { return !have[t.id] && !peaksCache[t.id]; });
+    var mbEst = missing.reduce(function (a, t) { var e = (t.path.match(/\.([a-z0-9]+)$/i) || [])[1] || ""; e = e.toLowerCase(); return a + (e === "wav" ? 7 : e === "mp3" ? 4.5 : (t.size_bytes || 0) / 1048576); }, 0);
+    box = document.getElementById("wave-admin"); if (!box) return;
+    var done = audio.length - missing.length;
+    box.innerHTML = '<p style="margin:0"><b>' + done + ' of ' + audio.length + '</b> tracks have a waveform.</p>' +
+      (missing.length ? '<p class="muted" style="margin:0;font-size:14px">Drawing the other ' + missing.length + ' reads small slices of each file (about ' + (mbEst >= 1024 ? (mbEst / 1024).toFixed(1) + ' GB' : Math.max(1, Math.round(mbEst)) + ' MB') + ' in all, not the full ' + mb(missing.reduce(function (a, t) { return a + (t.size_bytes || 0); }, 0)) + '). Do it once on a computer with good Wi-Fi and keep this tab open; the whole library takes roughly 20–30 minutes. New uploads get their waveform automatically.</p>' +
+        '<div class="tp-row"><button class="btn primary" id="wave-go"' + (WAVEJOB ? ' disabled' : '') + '>' + (WAVEJOB ? 'Drawing…' : 'Draw the missing waveforms') + '</button><span class="muted" id="wave-prog">' + (WAVEJOB ? esc(WAVEJOB.msg) : '') + '</span></div>' :
+        '<p class="muted" style="margin:0;font-size:14px">All done. New uploads get their waveform automatically.</p>');
+    var go = document.getElementById("wave-go");
+    if (go) go.onclick = function () {
+      go.disabled = true; go.textContent = "Drawing…";
+      WAVEJOB = { msg: "Starting…" };
+      buildPeaks(missing, function (ok, fail, n) {
+        WAVEJOB.msg = (ok + fail) + " of " + n + " done" + (fail ? " · " + fail + " couldn’t be read" : "");
+        var pr = document.getElementById("wave-prog"); if (pr) pr.textContent = WAVEJOB.msg;
+      }).then(function (res) { WAVEJOB = null; var pr = document.getElementById("wave-prog"); if (pr) { waveAdmin(); } });
     };
   }
 
