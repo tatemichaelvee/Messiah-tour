@@ -37,14 +37,18 @@
   .lvl input{width:110px}
 }
 
-/* reorder stems (admins) */
-.mix-head{display:flex;align-items:baseline;justify-content:space-between;gap:12px}
-.mix-head h3{margin-bottom:0}
-.mix-head .linkbtn[aria-pressed="true"]{font-weight:700}
-.desk.reordering .trk{grid-template-columns:auto minmax(100px,1fr) auto minmax(70px,118px)!important}
-.desk.reordering .trk .dl{display:none}
-.mv{display:inline-flex;flex-direction:column;gap:3px}
-.mv button{width:34px;height:26px;border-radius:6px;border:1px solid var(--line);background:var(--sunk);color:var(--fg);font:700 15px/1 var(--body);cursor:pointer}
-.mv button:hover:not(:disabled){border-color:var(--fg);background:var(--surface)}
-.mv button:disabled{opacity:.3;cursor:default}
-@media (max-width:760px){.desk.reordering .trk{grid-template-columns:auto minmax(0,1fr) auto!important}.desk.reordering .trk>input[type=range]{grid-column:2/-1}}
+/* drag to reorder tracks */
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+.trk .tname{display:grid;grid-template-columns:auto 1fr;column-gap:8px;align-items:center;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;cursor:grab}
+.trk .tname .tkind{grid-column:2}
+.trk .tname .grip{grid-row:1/3}
+.grip{width:26px;height:34px;border:0;border-radius:6px;background:transparent;color:var(--muted);font:700 16px/1 var(--body);letter-spacing:-2px;cursor:grab;touch-action:none;padding:0}
+.grip:hover{background:var(--sunk);color:var(--fg)}
+.grip:focus-visible{outline:2px solid var(--focus);outline-offset:1px}
+.drag-on,.drag-on *{cursor:grabbing!important}
+.drag-lift{position:relative;z-index:5;background:var(--surface)!important;box-shadow:0 10px 28px rgba(0,0,0,.22);border-radius:10px;transition:box-shadow .15s ease}
+.drag-lift .tname{color:var(--red-ink)}
+.order-note{margin:8px 2px 0;font-size:13px;color:var(--muted)}
+.order-note .linkbtn{font-size:13px;min-height:0;padding:0 2px}
+.files-order td:first-child,.files-order th:first-child{width:30px;padding-right:0}
+.files-order tr.drag-lift{display:table-row}
