@@ -70,3 +70,9 @@
 .p-acts{margin-left:auto;display:inline-flex;gap:12px}
 .p-acts .linkbtn{font-size:13px;color:var(--muted)}
 @media (max-width:420px){.tp-main{gap:6px}.tp-main .clock{font-size:12px}.speed button{min-width:30px;padding:0 6px}#speed-val{min-width:50px}}
+
+/* library: what's in for each song */
+.have{display:flex;flex-wrap:wrap;gap:5px;margin-top:6px}
+.hv{font:700 11.5px/1 var(--body);padding:4px 8px;border-radius:999px;white-space:nowrap}
+.hv.yes{background:var(--ok-soft);color:var(--ok)}
+.hv.no{color:var(--muted);border:1px dashed var(--line)}

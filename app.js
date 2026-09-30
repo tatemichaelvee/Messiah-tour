@@ -37,6 +37,15 @@
     if (st || gd || song.lyrics || tracksFor(song.id, "chart").length) return { cls: "part", text: "Partial" };
     return { cls: "none", text: "Waiting" };
   }
+  // what's in for a song: stems, lyrics, guide cues (the BV parts & cues sheet)
+  function haveTags(song) {
+    var items = [
+      [tracksFor(song.id, "stem").length > 0, "stems ✅", "no stems yet"],
+      [!!(song.lyrics && String(song.lyrics).trim()), "lyrics ✅", "no lyrics"],
+      [!!(song.bv_notes && String(song.bv_notes).trim()), "guide cues ✅", "no guide cues"]
+    ];
+    return '<span class="have">' + items.map(function (x) { return '<span class="hv ' + (x[0] ? "yes" : "no") + '">' + x[x[0] ? 1 : 2] + '</span>'; }).join("") + '</span>';
+  }
   function prettyName(filename) {
     return filename.replace(/\.[a-z0-9]+$/i, "").replace(/[_]+/g, " ").replace(/\s+/g, " ").trim();
   }
@@ -292,7 +301,7 @@
 
   // ---------- library ----------
   function renderList() {
-    var total = S.songs.length, ready = S.songs.filter(function (s) { return status(s).cls === "ok"; }).length;
+    var total = S.songs.length, nStems = S.songs.filter(function (s) { return tracksFor(s.id, "stem").length > 0; }).length;
     var ag = artistGroups(true), inSet = S.songs.filter(function (s) { return setOf(s); }).length, other = S.songs.length - inSet;
     var chips = [{ key: "all", label: "All " + total }]
       .concat(CHIP_ORDER.map(function (n) { return ag.find(function (g) { return g.key === n; }); }).filter(Boolean)
@@ -312,8 +321,8 @@
     h += '<div class="finder"><input class="search" id="q" type="search" placeholder="Find a song or a lyric line" aria-label="Search songs and lyrics" value="' + esc(S.q) + '">' +
       '<div class="chips" role="group" aria-label="Show songs">' +
       chips.map(function (c) { return '<button class="chip' + (c.cls ? ' ' + c.cls : '') + '" data-view="' + esc(c.key) + '" aria-pressed="' + (S.view === c.key) + '">' + esc(c.label) + '</button>'; }).join("") +
-      '<span class="progress">' + ready + '/' + total + ' ready</span></div></div><div id="list"></div>' +
-      '<footer><span>“Ready” means stems and lyrics are in. “Partial” means some files are in.</span></footer></main>';
+      '<span class="progress">' + nStems + '/' + total + ' with stems</span></div></div><div id="list"></div>' +
+      '<footer><span>Each song shows whether its stems, lyrics and guide cues (BV parts &amp; cues) are in yet.</span></footer></main>';
     app.innerHTML = h;
     bindHeader();
     drawList();
@@ -345,13 +354,12 @@
       if (!list.length) return; any = true;
       out += '<section class="artist' + (g.other ? ' other' : '') + '"><div class="artist-head"><h2>' + esc(g.title) + '</h2><span class="sub">' + (g.sub ? esc(g.sub) + ' · ' : '') + list.length + ' song' + (list.length > 1 ? "s" : "") + '</span></div><ol class="songs">';
       list.forEach(function (s) {
-        var st = status(s), meta = [s.key ? esc(s.key) : "", s.bpm ? s.bpm + " bpm" : ""].filter(Boolean).join(" · ");
+        var meta = [s.key ? esc(s.key) : "", s.bpm ? s.bpm + " bpm" : ""].filter(Boolean).join(" · ");
         var by = g.setlist || g.other ? esc(s.artist) + (s.credit ? " · orig. " + esc(s.credit) : "") : (s.credit ? "orig. " + esc(s.credit) : esc(s.artist));
         out += '<li><a class="row" href="#/song/' + encodeURIComponent(s.id) + '" aria-label="Open ' + esc(s.title) + '">' +
           '<span class="thumb">' + (CFG.posterUrl ? '<img src="' + esc(CFG.posterUrl + (posterV ? "?v=" + posterV : "")) + '" alt="" loading="lazy" onerror="this.remove()">' : '') +
           '<span class="thumb-play" title="Play ' + esc(s.title) + '">' + ICON_THUMB + '</span></span>' +
-          '<span class="title-block"><span class="name">' + esc(s.title) + '</span><span class="by">' + (g.other ? '' : '<span class="num">' + String(g.songs.indexOf(s) + 1).padStart(2, "0") + '</span> ') + by + (meta ? ' · ' + meta : '') + (myStatus(s.id) !== "none" ? ' <span class="pmark ' + PR[myStatus(s.id)].cls + '">' + PR[myStatus(s.id)].label + '</span>' : '') + '</span></span>' +
-          '<span class="pill ' + st.cls + '">' + st.text + '</span></a></li>';
+          '<span class="title-block"><span class="name">' + esc(s.title) + '</span><span class="by">' + (g.other ? '' : '<span class="num">' + String(g.songs.indexOf(s) + 1).padStart(2, "0") + '</span> ') + by + (meta ? ' · ' + meta : '') + (myStatus(s.id) !== "none" ? ' <span class="pmark ' + PR[myStatus(s.id)].cls + '">' + PR[myStatus(s.id)].label + '</span>' : '') + '</span>' + haveTags(s) + '</span></a></li>';
       });
       out += '</ol></section>';
     });
