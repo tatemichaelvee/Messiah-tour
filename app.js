@@ -21,7 +21,7 @@
   var app = document.getElementById("app");
   var S = {
     session: null, member: null, songs: [], tracks: [], notice: "",
-    q: "", view: "all", sets: [], loginMode: "signin", editing: false
+    q: "", view: "all", sets: [], practice: {}, loginMode: "signin", editing: false
   };
   var mixer = null;
 
@@ -144,13 +144,15 @@
       sb.from("songs").select("*").order("artist_order").order("set_order"),
       sb.from("tracks").select("*"),
       sb.from("site_notice").select("body").eq("id", 1).maybeSingle(),
-      sb.from("sets").select("*").order("sort")
+      sb.from("sets").select("*").order("sort"),
+      sb.from("practice").select("*").eq("email", S.session.user.email.toLowerCase())
     ]);
     if (r[0].error) throw r[0].error;
     S.songs = r[0].data || [];
     S.tracks = (r[1].data) || [];
     S.notice = r[2].data ? r[2].data.body : "";
     S.sets = r[3].data || [];
+    S.practice = {}; (r[4].data || []).forEach(function (p) { S.practice[p.song_id] = p; });
   }
   // The show's running order: songs grouped by set (from Michael's confirmed setlist).
   // Songs with no set are kept in a separate "Not on the setlist" group at the end.
@@ -192,6 +194,7 @@
     if (parts[0] === "band") return { view: "band" };
     if (parts[0] === "upload") return { view: "upload" };
     if (parts[0] === "activity") return { view: "activity" };
+    if (parts[0] === "practice") return { view: "practice" };
     return { view: "list" };
   }
   window.addEventListener("hashchange", function () { S.editing = false; if (!/^#\/song\//.test(location.hash)) S.loggedSong = null; render(); window.scrollTo(0, 0); });
@@ -214,6 +217,7 @@
     if (r.view === "band" && isAdmin()) return renderBand();
     if (r.view === "upload" && isAdmin()) return renderBulk();
     if (r.view === "activity" && isAdmin()) return renderActivity();
+    if (r.view === "practice") return renderPractice();
     return renderList();
   }
 
@@ -265,6 +269,7 @@
       '<div class="topline"><div class="eyebrow">' + EYEBROW + '</div>' +
       '<div class="who"><span>' + esc(S.member.name || S.session.user.email) + '</span>' +
       (isAdmin() ? '<button class="online-pill" id="online-pill" type="button" hidden aria-controls="online-panel" aria-expanded="false"><span class="dot on" aria-hidden="true"></span><span>online</span></button>' : '') +
+      '<a href="#/practice">My practice</a>' +
       (isAdmin() ? '<a href="#/band">Band list</a><a href="#/upload">Bulk upload</a><a href="#/activity">Activity</a>' : '') +
       '<button class="linkbtn" id="signout">Sign out</button></div></div>' +
       (full ? '<div class="hero"><div class="hero-text">' +
@@ -341,7 +346,7 @@
         out += '<li><a class="row" href="#/song/' + encodeURIComponent(s.id) + '" aria-label="Open ' + esc(s.title) + '">' +
           '<span class="thumb">' + (CFG.posterUrl ? '<img src="' + esc(CFG.posterUrl + (posterV ? "?v=" + posterV : "")) + '" alt="" loading="lazy" onerror="this.remove()">' : '') +
           '<span class="thumb-play" title="Play ' + esc(s.title) + '">' + ICON_THUMB + '</span></span>' +
-          '<span class="title-block"><span class="name">' + esc(s.title) + '</span><span class="by">' + (g.other ? '' : '<span class="num">' + String(g.songs.indexOf(s) + 1).padStart(2, "0") + '</span> ') + by + (meta ? ' · ' + meta : '') + '</span></span>' +
+          '<span class="title-block"><span class="name">' + esc(s.title) + '</span><span class="by">' + (g.other ? '' : '<span class="num">' + String(g.songs.indexOf(s) + 1).padStart(2, "0") + '</span> ') + by + (meta ? ' · ' + meta : '') + (myStatus(s.id) !== "none" ? ' <span class="pmark ' + PR[myStatus(s.id)].cls + '">' + PR[myStatus(s.id)].label + '</span>' : '') + '</span></span>' +
           '<span class="pill ' + st.cls + '">' + st.text + '</span></a></li>';
       });
       out += '</ol></section>';
@@ -393,6 +398,10 @@
       if (stems.length && guides.length) h += '<p class="muted" style="font-size:14px">The guide mix starts muted so it doesn’t double the stems. Unmute it to hear the full recording.</p>';
     }
     h += '</div>';
+    var myNote = S.practice[s.id] && S.practice[s.id].note;
+    h += '<div class="block"><h3>My progress</h3>' + practiceControl(s.id, false) +
+      '<details class="p-notes"' + (myNote ? ' open' : '') + '><summary>' + (myNote ? 'My notes' : 'Add a practice note') + '</summary><textarea data-pnote="' + esc(s.id) + '" rows="2" placeholder="What to work on, e.g. second chorus harmony">' + esc(myNote || "") + '</textarea><span class="pnote-msg muted"></span></details>' +
+      '<p class="muted" style="margin:6px 0 0;font-size:13px">Only you' + (isAdmin() ? '' : ' and the tour admins') + ' see this. All your songs are on <a href="#/practice">My practice</a>.</p></div>';
 
     if (charts.length) {
       h += '<div class="block"><h3>Charts</h3><div class="charts">' + charts.map(function (c) { return '<button class="btn quiet" data-chart="' + esc(c.id) + '">' + esc(c.label) + ' ↗</button>'; }).join("") + '</div></div>';
@@ -538,6 +547,136 @@
     var r = await sb.storage.from(BUCKET).createSignedUrl(t.path, 3600, opts);
     if (r.error) { if (win) win.close(); alert("Couldn't open that file: " + r.error.message); return; }
     if (win) win.location = r.data.signedUrl; else location.href = r.data.signedUrl;
+  }
+
+  // ---------- practice tracker ----------
+  // Everyone marks their own progress per song (Not started → Learning → Almost there →
+  // Show-ready, or "Not my part"). Only you see your own marks; admins also get a team view.
+  var PR = {
+    none: { label: "Not started", cls: "p-none" },
+    learning: { label: "Learning", cls: "p-learn" },
+    almost: { label: "Almost there", cls: "p-almost" },
+    ready: { label: "Show-ready", cls: "p-ready" },
+    skip: { label: "Not my part", cls: "p-skip" }
+  };
+  var PR_ORDER = ["none", "learning", "almost", "ready"];
+  var FIRST_SHOW = new Date("2026-10-09T19:00:00-06:00"); // Edmonton
+  function myStatus(id) { var p = S.practice[id]; return p ? p.status : "none"; }
+  function bandPlaysSet(no) { var st = S.sets.find(function (x) { return x.no === no; }); return !!st && st.band_plays !== false; }
+  // the songs the band has to learn: setlist sets the band plays, in running order
+  function practiceGroups() {
+    return setGroups().filter(function (g) { return !g.other && bandPlaysSet(+g.key); });
+  }
+  function practiceSongs() { return [].concat.apply([], practiceGroups().map(function (g) { return g.songs; })); }
+  function daysToShow() { return Math.max(0, Math.ceil((FIRST_SHOW - Date.now()) / 86400000)); }
+  function tally(statusOf, songs) {
+    var c = { none: 0, learning: 0, almost: 0, ready: 0, skip: 0 };
+    songs.forEach(function (s) { c[statusOf(s.id)]++; });
+    c.total = songs.length - c.skip;
+    return c;
+  }
+  function stackBar(c) {
+    if (!c.total) return '<div class="pbar"></div>';
+    return '<div class="pbar" role="img" aria-label="' + c.ready + ' show-ready, ' + c.almost + ' almost there, ' + c.learning + ' learning, ' + c.none + ' not started">' +
+      ["ready", "almost", "learning"].map(function (k) { return c[k] ? '<span class="' + PR[k].cls + '" style="width:' + (c[k] / c.total * 100) + '%"></span>' : ''; }).join("") + '</div>';
+  }
+  function practiceControl(id, compact) {
+    var cur = myStatus(id);
+    return '<span class="pseg' + (compact ? ' compact' : '') + '" role="group" aria-label="My progress" data-psong="' + esc(id) + '">' +
+      PR_ORDER.map(function (k) { return '<button type="button" class="' + PR[k].cls + '" data-pstat="' + k + '" aria-pressed="' + (cur === k) + '">' + PR[k].label + '</button>'; }).join("") +
+      '<button type="button" class="p-skip" data-pstat="skip" aria-pressed="' + (cur === "skip") + '" title="Not something you play or sing">Not my part</button></span>';
+  }
+  async function setPractice(songId, status, note) {
+    var me = S.session.user.email.toLowerCase(), cur = S.practice[songId];
+    var n = note === undefined ? (cur ? cur.note : null) : ((note || "").trim() || null);
+    if (status === "none" && !n) {
+      delete S.practice[songId];
+      return sb.from("practice").delete().eq("email", me).eq("song_id", songId);
+    }
+    var row = { email: me, song_id: songId, status: status, note: n, updated_at: new Date().toISOString() };
+    S.practice[songId] = row;
+    return sb.from("practice").upsert(row, { onConflict: "email,song_id" });
+  }
+  // one listener for every progress control on any page
+  app.addEventListener("click", function (e) {
+    var b = e.target.closest && e.target.closest("[data-pstat]"); if (!b) return;
+    var grp = b.closest("[data-psong]"), id = grp.dataset.psong, k = b.dataset.pstat;
+    if (k === myStatus(id) && k !== "none") k = "none"; // tap the lit one again to clear it
+    setPractice(id, k).then(function (r) { if (r && r.error) alert("Couldn't save your progress: " + r.error.message); });
+    app.querySelectorAll('[data-psong="' + CSS.escape(id) + '"] [data-pstat]').forEach(function (x) { x.setAttribute("aria-pressed", String(x.dataset.pstat === k)); });
+    var sm = document.getElementById("p-summary"); if (sm) sm.innerHTML = practiceSummary();
+  });
+  app.addEventListener("change", function (e) {
+    var t = e.target; if (!t.dataset || !t.dataset.pnote) return;
+    setPractice(t.dataset.pnote, myStatus(t.dataset.pnote), t.value).then(function (r) {
+      var m = t.parentNode.querySelector(".pnote-msg"); if (m) m.textContent = r && r.error ? "Couldn't save: " + r.error.message : "Saved";
+    });
+  });
+  function practiceSummary() {
+    var songs = practiceSongs(), c = tally(myStatus, songs), d = daysToShow();
+    return '<div class="p-hero"><div><b class="p-big">' + c.ready + '<small>/' + c.total + '</small></b><span>songs show-ready</span></div>' +
+      '<div><b class="p-big">' + d + '</b><span>day' + (d === 1 ? '' : 's') + ' to Edmonton</span></div></div>' + stackBar(c) +
+      '<div class="plegend">' + ["ready", "almost", "learning", "none", "skip"].map(function (k) { return '<span><i class="' + PR[k].cls + '"></i>' + PR[k].label + ' ' + c[k] + '</span>'; }).join("") + '</div>';
+  }
+  var PVIEW = { tab: "mine" };
+  async function renderPractice() {
+    app.innerHTML = header() + '<main class="sheet"><a class="back" href="#/"><span class="arr" aria-hidden="true">←</span> All songs</a><p class="muted">Loading your practice…</p></main>';
+    bindHeader();
+    var me = S.session.user.email.toLowerCase();
+    var q = [sb.from("listens").select("song_id,seconds").eq("email", me)];
+    if (isAdmin()) q.push(sb.from("practice").select("*"), sb.from("band_members").select("email,name,role"));
+    var r = await Promise.all(q);
+    if (route().view !== "practice") return;
+    var mins = {}; (r[0].data || []).forEach(function (l) { mins[l.song_id] = (mins[l.song_id] || 0) + (l.seconds || 0); });
+    var admin = isAdmin(), tab = admin ? PVIEW.tab : "mine";
+    var h = header() + '<main class="sheet"><a class="back" href="#/"><span class="arr" aria-hidden="true">←</span> All songs</a>' +
+      '<div class="p-top"><h2>' + (tab === "team" ? "Team readiness" : "My practice") + '</h2>' +
+      (admin ? '<span class="seg dark" role="group" aria-label="View"><button data-ptab="mine" aria-pressed="' + (tab === "mine") + '">Mine</button><button data-ptab="team" aria-pressed="' + (tab === "team") + '">Team</button></span>' : '') + '</div>';
+    if (tab === "mine") {
+      h += '<p class="muted" style="margin:6px 0 16px">Mark where you are with each song on the setlist. Only you see your marks' + (admin ? '' : ' (and the tour admins, so they know what to run at rehearsal)') + '. Tap a lit button again to clear it.</p>' +
+        '<div class="card p-card" id="p-summary">' + practiceSummary() + '</div>';
+      practiceGroups().forEach(function (g) {
+        h += '<section class="p-set"><div class="artist-head"><h2>' + esc(g.title) + '</h2><span class="sub">' + (g.sub ? esc(g.sub) + ' · ' : '') + g.songs.length + ' songs</span></div><ol class="p-list">';
+        g.songs.forEach(function (s, i) {
+          var note = S.practice[s.id] && S.practice[s.id].note;
+          h += '<li><div class="p-song"><span class="num">' + String(i + 1).padStart(2, "0") + '</span><a href="#/song/' + encodeURIComponent(s.id) + '">' + esc(s.title) + '</a>' +
+            '<span class="meta">' + (mins[s.id] ? 'listened ' + fmtDur(mins[s.id]) : 'not played yet') + '</span></div>' +
+            practiceControl(s.id, true) +
+            '<details class="p-notes"' + (note ? ' open' : '') + '><summary>' + (note ? 'My notes' : 'Add a note') + '</summary><textarea data-pnote="' + esc(s.id) + '" rows="2" placeholder="e.g. second chorus harmony, key change at the bridge">' + esc(note || "") + '</textarea><span class="pnote-msg muted"></span></details></li>';
+        });
+        h += '</ol></section>';
+      });
+    } else {
+      var all = r[1].data || [], members = (r[2].data || []).slice().sort(function (a, b) { return (a.name || a.email).localeCompare(b.name || b.email); });
+      var by = {}; all.forEach(function (p) { (by[p.email] = by[p.email] || {})[p.song_id] = p; });
+      var songs = practiceSongs();
+      var rows = members.map(function (m) {
+        var mine = by[m.email] || {}, st = function (id) { return mine[id] ? mine[id].status : "none"; };
+        var c = tally(st, songs), last = Object.keys(mine).map(function (k) { return mine[k].updated_at; }).sort().pop();
+        return { m: m, c: c, st: st, last: last, pct: c.total ? c.ready / c.total : 0 };
+      }).sort(function (a, b) { return b.pct - a.pct || b.c.almost - a.c.almost; });
+      h += '<p class="muted" style="margin:6px 0 16px">Everyone’s own marks on the ' + songs.length + ' setlist songs the band plays. “Not my part” songs don’t count against anyone.</p>' +
+        '<div class="card p-card"><h3>By person</h3><div class="tablewrap"><table class="band act p-team"><thead><tr><th>Name</th><th>Progress</th><th>Ready</th><th>Almost</th><th>Learning</th><th>Not started</th><th>Updated</th></tr></thead><tbody>' +
+        rows.map(function (x) {
+          return '<tr><td><span class="dot off" data-online="' + esc(x.m.email) + '" aria-hidden="true"></span><b>' + esc(x.m.name || x.m.email) + '</b></td><td style="min-width:140px">' + stackBar(x.c) + '<div class="meta">' + Math.round(x.pct * 100) + '% show-ready</div></td>' +
+            '<td class="n">' + x.c.ready + '</td><td class="n">' + x.c.almost + '</td><td class="n">' + x.c.learning + '</td><td class="n">' + x.c.none + '</td><td>' + (x.last ? ago(x.last) : '<span class="muted">not yet</span>') + '</td></tr>';
+        }).join("") + '</tbody></table></div></div>' +
+        '<div class="card p-card" style="margin-top:20px"><h3>Songs that need the most work</h3><ol class="p-needs">' +
+        songs.map(function (s) {
+          var who = rows.map(function (x) { return { name: x.m.name || x.m.email, st: x.st(s.id) }; }).filter(function (w) { return w.st !== "skip"; });
+          var ready = who.filter(function (w) { return w.st === "ready"; }).length;
+          return { s: s, who: who, ready: ready, score: who.length ? ready / who.length : 1 };
+        }).sort(function (a, b) { return a.score - b.score; }).map(function (x) {
+          var behind = x.who.filter(function (w) { return w.st !== "ready"; });
+          return '<li><div class="ts-line"><a href="#/song/' + encodeURIComponent(x.s.id) + '">' + esc(x.s.title) + '</a><b>' + x.ready + '/' + x.who.length + ' ready</b></div>' +
+            (behind.length ? '<div class="p-who">' + behind.map(function (w) { return '<span class="pmark ' + PR[w.st].cls + '">' + esc(w.name) + ' · ' + PR[w.st].label + '</span>'; }).join("") + '</div>' : '<div class="meta">Everyone is show-ready</div>') + '</li>';
+        }).join("") + '</ol></div>';
+    }
+    h += '</main>';
+    app.innerHTML = h;
+    bindHeader();
+    app.querySelectorAll("[data-ptab]").forEach(function (b) { b.onclick = function () { PVIEW.tab = b.dataset.ptab; renderPractice(); }; });
+    drawOnline();
   }
 
   // ---------- who's online ----------
