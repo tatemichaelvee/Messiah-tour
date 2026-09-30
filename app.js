@@ -21,7 +21,7 @@
   var app = document.getElementById("app");
   var S = {
     session: null, member: null, songs: [], tracks: [], notice: "",
-    q: "", view: "all", sets: [], practice: {}, loginMode: "signin", editing: false
+    q: "", view: "all", sets: [], practice: {}, log: [], loginMode: "signin", editing: false
   };
   var mixer = null;
 
@@ -145,7 +145,8 @@
       sb.from("tracks").select("*"),
       sb.from("site_notice").select("body").eq("id", 1).maybeSingle(),
       sb.from("sets").select("*").order("sort"),
-      sb.from("practice").select("*").eq("email", S.session.user.email.toLowerCase())
+      sb.from("practice").select("*").eq("email", S.session.user.email.toLowerCase()),
+      sb.from("practice_log").select("*").eq("email", S.session.user.email.toLowerCase()).order("day", { ascending: false }).order("created_at", { ascending: false })
     ]);
     if (r[0].error) throw r[0].error;
     S.songs = r[0].data || [];
@@ -153,6 +154,7 @@
     S.notice = r[2].data ? r[2].data.body : "";
     S.sets = r[3].data || [];
     S.practice = {}; (r[4].data || []).forEach(function (p) { S.practice[p.song_id] = p; });
+    S.log = (r[5] && r[5].data) || [];
   }
   // The show's running order: songs grouped by set (from Michael's confirmed setlist).
   // Songs with no set are kept in a separate "Not on the setlist" group at the end.
@@ -194,7 +196,7 @@
     if (parts[0] === "band") return { view: "band" };
     if (parts[0] === "upload") return { view: "upload" };
     if (parts[0] === "activity") return { view: "activity" };
-    if (parts[0] === "practice") return { view: "practice" };
+    if (parts[0] === "practice") return { view: "practice", log: parts[1] === "log" ? decodeURIComponent(parts[2] || "") || true : null };
     return { view: "list" };
   }
   window.addEventListener("hashchange", function () { S.editing = false; if (!/^#\/song\//.test(location.hash)) S.loggedSong = null; render(); window.scrollTo(0, 0); });
@@ -401,6 +403,7 @@
     var myNote = S.practice[s.id] && S.practice[s.id].note;
     h += '<div class="block"><h3>My progress</h3>' + practiceControl(s.id, false) +
       '<details class="p-notes"' + (myNote ? ' open' : '') + '><summary>' + (myNote ? 'My notes' : 'Add a practice note') + '</summary><textarea data-pnote="' + esc(s.id) + '" rows="2" placeholder="What to work on, e.g. second chorus harmony">' + esc(myNote || "") + '</textarea><span class="pnote-msg muted"></span></details>' +
+      songLogHtml(s.id) +
       '<p class="muted" style="margin:6px 0 0;font-size:13px">Only you' + (isAdmin() ? '' : ' and the tour admins') + ' see this. All your songs are on <a href="#/practice">My practice</a>.</p></div>';
 
     if (charts.length) {
@@ -618,48 +621,230 @@
       '<div><b class="p-big">' + d + '</b><span>day' + (d === 1 ? '' : 's') + ' to Edmonton</span></div></div>' + stackBar(c) +
       '<div class="plegend">' + ["ready", "almost", "learning", "none", "skip"].map(function (k) { return '<span><i class="' + PR[k].cls + '"></i>' + PR[k].label + ' ' + c[k] + '</span>'; }).join("") + '</div>';
   }
+  // ---------- practice log (diary) ----------
+  // Log what you practised on a given day: which songs, which part, which sections and
+  // whether you learnt it. Logging moves the song's progress forward (never backwards):
+  // any practice → at least "Learning"; learnt the whole song → at least "Almost there".
+  // "Show-ready" stays your call.
+  var LOG_PARTS = ["Guitar", "Bass", "Keys", "Drums", "Vocals", "BVs", "Other"];
+  var SECTIONS = ["Whole song", "Intro", "Verse", "Pre-chorus", "Chorus", "Bridge", "Solo", "Outro"];
+  function pad2(n) { return String(n).padStart(2, "0"); }
+  function localDay(d) { d = d || new Date(); return d.getFullYear() + "-" + pad2(d.getMonth() + 1) + "-" + pad2(d.getDate()); }
+  function dayShift(iso, n) { var d = new Date(iso + "T12:00:00"); d.setDate(d.getDate() + n); return localDay(d); }
+  function dayLabel(iso) {
+    var t = localDay();
+    if (iso === t) return "Today";
+    if (iso === dayShift(t, -1)) return "Yesterday";
+    return new Date(iso + "T12:00:00").toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
+  }
+  function dayPhrase(iso) { var d = dayLabel(iso); return /^(Today|Yesterday)$/.test(d) ? d.toLowerCase() : d; }
+  function songTitle(id) { var s = S.songs.find(function (x) { return x.id === id; }); return s ? s.title : id; }
+  function whatText(sections, outcome) {
+    var whole = sections.indexOf("Whole song") !== -1;
+    var what = whole ? "the whole song" : sections.map(function (x) { return x.toLowerCase(); }).join(", ");
+    return (outcome === "learnt" ? "Learnt " : "Worked on ") + what;
+  }
+  // what I've learnt so far on a song, per part: "Guitar: whole song" / "Guitar: chorus, verse"
+  function learntText(id) {
+    var by = {};
+    S.log.forEach(function (l) {
+      if (l.song_id !== id || l.outcome !== "learnt") return;
+      var p = by[l.part] = by[l.part] || [];
+      l.sections.forEach(function (x) { if (p.indexOf(x) === -1) p.push(x); });
+    });
+    return Object.keys(by).map(function (p) {
+      var secs = by[p];
+      return p + ": " + (secs.indexOf("Whole song") !== -1 ? "whole song" : SECTIONS.filter(function (x) { return secs.indexOf(x) !== -1; }).map(function (x) { return x.toLowerCase(); }).join(", "));
+    }).join(" · ");
+  }
+  function lastPractised(id) { var l = S.log.find(function (x) { return x.song_id === id; }); return l ? l.day : null; }
+  function songLogHtml(id) {
+    var lt = learntText(id), mine = S.log.filter(function (l) { return l.song_id === id; }).slice(0, 4);
+    return '<div class="p-songlog">' +
+      (lt ? '<div class="p-learnt">✓ Learnt so far: ' + esc(lt) + '</div>' : '') +
+      (mine.length ? '<ul>' + mine.map(function (l) { return '<li><b>' + esc(dayLabel(l.day)) + '</b> · ' + esc(l.part) + ' · ' + esc(whatText(l.sections, l.outcome)) + (l.note ? ' <span class="muted">— ' + esc(l.note) + '</span>' : '') + '</li>'; }).join("") + '</ul>' : '') +
+      '<a class="btn quiet p-logbtn" href="#/practice/log/' + encodeURIComponent(id) + '">＋ Log practice for this song</a></div>';
+  }
+  // group rows saved together (same day, same save) into one diary entry
+  function sessions(rows) {
+    var out = [], key = {};
+    rows.forEach(function (l) {
+      var k = l.email + "|" + l.day + "|" + l.created_at + "|" + l.part + "|" + l.outcome + "|" + l.sections.join(",");
+      if (!key[k]) { key[k] = { email: l.email, day: l.day, part: l.part, outcome: l.outcome, sections: l.sections, note: l.note, minutes: 0, songs: [], ids: [], at: l.created_at }; out.push(key[k]); }
+      key[k].songs.push(l.song_id); key[k].ids.push(l.id); key[k].minutes += l.minutes || 0;
+    });
+    return out;
+  }
+  function streak(days) {
+    var set = {}; days.forEach(function (d) { set[d] = 1; });
+    var d = localDay(); if (!set[d]) d = dayShift(d, -1);
+    var n = 0; while (set[d]) { n++; d = dayShift(d, -1); }
+    return n;
+  }
+  function logStats() {
+    var days = {}; S.log.forEach(function (l) { days[l.day] = (days[l.day] || 0) + 1; });
+    var list = Object.keys(days), mins = S.log.reduce(function (a, l) { return a + (l.minutes || 0); }, 0);
+    var t = localDay(), strip = "";
+    for (var i = 13; i >= 0; i--) {
+      var d = dayShift(t, -i), n = days[d] || 0;
+      strip += '<span class="p-day' + (n ? ' on' : '') + (i === 0 ? ' today' : '') + '" title="' + esc(dayLabel(d)) + (n ? ': ' + n + ' song' + (n === 1 ? '' : 's') : ': no practice logged') + '"><i style="opacity:' + (n ? Math.min(1, .45 + n * .15) : 1) + '"></i><small>' + new Date(d + "T12:00:00").toLocaleDateString(undefined, { weekday: "narrow" }) + '</small></span>';
+    }
+    return '<div class="p-hero"><div><b class="p-big">' + list.length + '</b><span>days practised</span></div>' +
+      '<div><b class="p-big">' + streak(list) + '</b><span>day streak</span></div>' +
+      (mins ? '<div><b class="p-big">' + (mins >= 60 ? Math.floor(mins / 60) + '<small>h</small> ' + (mins % 60 ? (mins % 60) + '<small>m</small>' : '') : mins + '<small>m</small>') + '</b><span>logged</span></div>' : '') +
+      '</div><div class="p-strip" aria-label="Last 14 days">' + strip + '</div>';
+  }
+
+  // the "Log practice" form
+  var LOGF = null;
+  function newLogForm(songId) {
+    var last = S.log[0];
+    LOGF = { day: localDay(), part: last ? last.part : "", songs: songId && songId !== true ? [songId] : [], sections: ["Whole song"], outcome: "learnt", minutes: "", note: "", msg: "" };
+  }
+  function logFormHtml() {
+    var f = LOGF, t = localDay(), y = dayShift(t, -1);
+    var pick = function (attr, val, on, label, cls) { return '<button type="button" class="lf-chip' + (cls ? ' ' + cls : '') + '" data-lf="' + attr + '" data-v="' + esc(val) + '" aria-pressed="' + on + '">' + esc(label || val) + '</button>'; };
+    var h = '<div class="p-top"><h3>Log practice</h3><button type="button" class="linkbtn" data-lf="close">Cancel</button></div>' +
+      '<div class="lf-row"><span class="lf-lab">When</span><div class="lf-chips">' + pick("day", t, f.day === t, "Today") + pick("day", y, f.day === y, "Yesterday") +
+      '<input type="date" class="lf-date" data-lfin="day" value="' + f.day + '" max="' + t + '" min="2026-08-01" aria-label="Pick another day"></div></div>' +
+      '<div class="lf-row"><span class="lf-lab">Part</span><div class="lf-chips">' + LOG_PARTS.map(function (p) { return pick("part", p, f.part === p); }).join("") + '</div></div>' +
+      '<div class="lf-row"><span class="lf-lab">Songs <em>' + (f.songs.length ? f.songs.length + ' picked' : 'pick one or more') + '</em></span><div class="lf-songs">' +
+      practiceGroups().map(function (g) {
+        return '<div class="lf-set"><small>' + esc(g.short || g.title) + '</small><div class="lf-chips">' + g.songs.map(function (s) { return pick("song", s.id, f.songs.indexOf(s.id) !== -1, s.title); }).join("") + '</div></div>';
+      }).join("") + '</div></div>' +
+      '<div class="lf-row"><span class="lf-lab">What</span><div class="lf-chips">' + SECTIONS.map(function (x) { return pick("sec", x, f.sections.indexOf(x) !== -1); }).join("") + '</div></div>' +
+      '<div class="lf-row"><span class="lf-lab">How did it go</span><div class="lf-chips">' + pick("out", "learnt", f.outcome === "learnt", "Learnt it ✓", "p-ready") + pick("out", "worked", f.outcome === "worked", "Still working on it", "p-learn") + '</div></div>' +
+      '<div class="lf-row two"><label><span class="lf-lab">Minutes <em>optional, total</em></span><input type="number" inputmode="numeric" min="1" max="600" data-lfin="minutes" value="' + esc(f.minutes) + '" placeholder="e.g. 45"></label>' +
+      '<label><span class="lf-lab">Note <em>optional</em></span><input type="text" maxlength="300" data-lfin="note" value="' + esc(f.note) + '" placeholder="e.g. the guitar line in the chorus"></label></div>' +
+      '<div class="lf-foot"><button type="button" class="btn" data-lf="save">Save to my diary</button><span class="muted lf-msg" role="status">' + esc(f.msg) + '</span></div>';
+    return h;
+  }
+  function drawLogForm() { var el = document.getElementById("p-logform"); if (el) el.innerHTML = logFormHtml(); }
+  function toggleIn(arr, v) { var i = arr.indexOf(v); if (i === -1) arr.push(v); else arr.splice(i, 1); }
+  async function saveLog() {
+    var f = LOGF;
+    var err = !f.part ? "Pick the part you practised." : !f.songs.length ? "Pick at least one song." : !f.sections.length ? "Pick what you worked on." : f.day > localDay() ? "That day hasn’t happened yet." : "";
+    if (err) { f.msg = err; drawLogForm(); return; }
+    var me = S.session.user.email.toLowerCase(), m = parseInt(f.minutes, 10);
+    // split the session's minutes across the songs so they add back up to the total
+    var n = f.songs.length, base = m > 0 ? Math.floor(m / n) : 0, extra = m > 0 ? m % n : 0;
+    var rows = f.songs.map(function (id, i) { var mm = m > 0 ? base + (i < extra ? 1 : 0) : 0; return { email: me, day: f.day, song_id: id, part: f.part, sections: f.sections.slice(), outcome: f.outcome, minutes: mm > 0 ? mm : null, note: f.note.trim() || null }; });
+    f.msg = "Saving…"; drawLogForm();
+    var r = await sb.from("practice_log").insert(rows).select();
+    if (r.error) { f.msg = "Couldn’t save: " + r.error.message; drawLogForm(); return; }
+    S.log = (r.data || []).concat(S.log).sort(function (a, b) { return a.day < b.day ? 1 : a.day > b.day ? -1 : (a.created_at < b.created_at ? 1 : -1); });
+    // move progress forward, never back
+    var whole = f.outcome === "learnt" && f.sections.indexOf("Whole song") !== -1, moved = [];
+    for (var i = 0; i < f.songs.length; i++) {
+      var id = f.songs[i], cur = myStatus(id), next = cur;
+      if (cur === "none" || cur === "skip") next = "learning";
+      if (whole && next === "learning") next = "almost";
+      if (next !== cur) { moved.push(songTitle(id) + " → " + PR[next].label); await setPractice(id, next); }
+    }
+    PFLASH = "Logged " + f.songs.length + " song" + (f.songs.length === 1 ? "" : "s") + " for " + dayPhrase(f.day) + "." +
+      (moved.length ? " Progress updated: " + moved.join(", ") + "." : "") + (whole ? " When you can play it through with the track, mark it Show-ready." : "");
+    LOGF = null;
+    if (/^#\/practice\/log/.test(location.hash)) history.replaceState(null, "", "#/practice");
+    renderPractice();
+  }
+  var PFLASH = "";
+  app.addEventListener("click", function (e) {
+    var b = e.target.closest && e.target.closest("[data-lf]"); if (!b) return;
+    var a = b.dataset.lf, v = b.dataset.v;
+    if (a === "open") { newLogForm(); var el = document.getElementById("p-logform"); el.hidden = false; drawLogForm(); el.scrollIntoView({ behavior: "smooth", block: "start" }); return; }
+    if (a === "close") { LOGF = null; var c = document.getElementById("p-logform"); if (c) { c.hidden = true; c.innerHTML = ""; } if (/^#\/practice\/log/.test(location.hash)) history.replaceState(null, "", "#/practice"); return; }
+    if (a === "save") { saveLog(); return; }
+    if (a === "del") {
+      if (!confirm("Delete this diary entry? Your progress marks stay as they are.")) return;
+      var ids = v.split(",");
+      sb.from("practice_log").delete().in("id", ids).then(function (r) {
+        if (r.error) return alert("Couldn’t delete: " + r.error.message);
+        S.log = S.log.filter(function (l) { return ids.indexOf(l.id) === -1; }); renderPractice();
+      });
+      return;
+    }
+    if (!LOGF) return;
+    if (a === "day") LOGF.day = v;
+    else if (a === "part") LOGF.part = v;
+    else if (a === "song") toggleIn(LOGF.songs, v);
+    else if (a === "out") LOGF.outcome = v;
+    else if (a === "sec") {
+      if (v === "Whole song") LOGF.sections = LOGF.sections.indexOf(v) === -1 ? ["Whole song"] : [];
+      else { LOGF.sections = LOGF.sections.filter(function (x) { return x !== "Whole song"; }); toggleIn(LOGF.sections, v); }
+    }
+    LOGF.msg = ""; drawLogForm();
+  });
+  app.addEventListener("input", function (e) {
+    var t = e.target; if (!LOGF || !t.dataset || !t.dataset.lfin) return;
+    LOGF[t.dataset.lfin] = t.value;
+    if (t.dataset.lfin === "day" && t.value) drawLogForm();
+  });
+  function diaryHtml(rows, showWho, nameOf) {
+    var ss = sessions(rows);
+    if (!ss.length) return '<p class="muted">' + (showWho ? 'Nobody has logged any practice yet.' : 'Nothing logged yet. Tap “Log practice” after each session and it’ll build up here.') + '</p>';
+    var h = '', lastDay = null;
+    ss.forEach(function (x) {
+      if (x.day !== lastDay) { if (lastDay) h += '</ul>'; h += '<h4 class="p-dayhead">' + esc(dayLabel(x.day)) + '</h4><ul class="p-diary">'; lastDay = x.day; }
+      h += '<li><div class="p-entry"><span class="pmark ' + (x.outcome === "learnt" ? 'p-ready' : 'p-learn') + '">' + esc(x.part) + '</span>' +
+        (showWho ? '<b>' + esc(nameOf(x.email)) + '</b> ' : '') + esc(whatText(x.sections, x.outcome)) + (x.minutes ? ' <span class="muted">· ' + x.minutes + ' min</span>' : '') +
+        (!showWho ? '<button type="button" class="linkbtn p-del" data-lf="del" data-v="' + esc(x.ids.join(",")) + '" aria-label="Delete this entry">Delete</button>' : '') + '</div>' +
+        '<div class="p-entry-songs">' + x.songs.map(function (id) { return '<a href="#/song/' + encodeURIComponent(id) + '">' + esc(songTitle(id)) + '</a>'; }).join("") + '</div>' +
+        (x.note ? '<div class="muted p-entry-note">' + esc(x.note) + '</div>' : '') + '</li>';
+    });
+    return h + '</ul>';
+  }
   var PVIEW = { tab: "mine" };
   async function renderPractice() {
     app.innerHTML = header() + '<main class="sheet"><a class="back" href="#/"><span class="arr" aria-hidden="true">←</span> All songs</a><p class="muted">Loading your practice…</p></main>';
     bindHeader();
     var me = S.session.user.email.toLowerCase();
     var q = [sb.from("listens").select("song_id,seconds").eq("email", me)];
-    if (isAdmin()) q.push(sb.from("practice").select("*"), sb.from("band_members").select("email,name,role"));
+    if (isAdmin()) q.push(sb.from("practice").select("*"), sb.from("band_members").select("email,name,role"),
+      sb.from("practice_log").select("*").order("day", { ascending: false }).order("created_at", { ascending: false }).limit(500));
     var r = await Promise.all(q);
     if (route().view !== "practice") return;
     var mins = {}; (r[0].data || []).forEach(function (l) { mins[l.song_id] = (mins[l.song_id] || 0) + (l.seconds || 0); });
-    var admin = isAdmin(), tab = admin ? PVIEW.tab : "mine";
+    var admin = isAdmin(), rt = route(), tab = admin && !rt.log ? PVIEW.tab : "mine";
+    if (rt.log && !LOGF) newLogForm(rt.log);
     var h = header() + '<main class="sheet"><a class="back" href="#/"><span class="arr" aria-hidden="true">←</span> All songs</a>' +
       '<div class="p-top"><h2>' + (tab === "team" ? "Team readiness" : "My practice") + '</h2>' +
       (admin ? '<span class="seg dark" role="group" aria-label="View"><button data-ptab="mine" aria-pressed="' + (tab === "mine") + '">Mine</button><button data-ptab="team" aria-pressed="' + (tab === "team") + '">Team</button></span>' : '') + '</div>';
     if (tab === "mine") {
       h += '<p class="muted" style="margin:6px 0 16px">Mark where you are with each song on the setlist. Only you see your marks' + (admin ? '' : ' (and the tour admins, so they know what to run at rehearsal)') + '. Tap a lit button again to clear it.</p>' +
-        '<div class="card p-card" id="p-summary">' + practiceSummary() + '</div>';
+        '<div class="card p-card" id="p-summary">' + practiceSummary() + '</div>' +
+        (PFLASH ? '<div class="p-flash" role="status">' + esc(PFLASH) + '</div>' : '') +
+        '<div class="card p-card p-diarycard" style="margin-top:16px"><div class="p-top"><h3>Practice diary</h3>' + (LOGF ? '' : '<button type="button" class="btn" data-lf="open">＋ Log practice</button>') + '</div>' + logStats() + '</div>' +
+        '<div class="card p-card p-logform" id="p-logform"' + (LOGF ? '' : ' hidden') + '>' + (LOGF ? logFormHtml() : '') + '</div>';
+      PFLASH = "";
       practiceGroups().forEach(function (g) {
         h += '<section class="p-set"><div class="artist-head"><h2>' + esc(g.title) + '</h2><span class="sub">' + (g.sub ? esc(g.sub) + ' · ' : '') + g.songs.length + ' songs</span></div><ol class="p-list">';
         g.songs.forEach(function (s, i) {
           var note = S.practice[s.id] && S.practice[s.id].note;
           h += '<li><div class="p-song"><span class="num">' + String(i + 1).padStart(2, "0") + '</span><a href="#/song/' + encodeURIComponent(s.id) + '">' + esc(s.title) + '</a>' +
-            '<span class="meta">' + (mins[s.id] ? 'listened ' + fmtDur(mins[s.id]) : 'not played yet') + '</span></div>' +
+            '<span class="meta">' + (lastPractised(s.id) ? 'practised ' + esc(dayPhrase(lastPractised(s.id))) + ' · ' : '') + (mins[s.id] ? 'listened ' + fmtDur(mins[s.id]) : 'not played yet') + '</span></div>' +
+            (learntText(s.id) ? '<div class="p-learnt">✓ ' + esc(learntText(s.id)) + '</div>' : '') +
             practiceControl(s.id, true) +
             '<details class="p-notes"' + (note ? ' open' : '') + '><summary>' + (note ? 'My notes' : 'Add a note') + '</summary><textarea data-pnote="' + esc(s.id) + '" rows="2" placeholder="e.g. second chorus harmony, key change at the bridge">' + esc(note || "") + '</textarea><span class="pnote-msg muted"></span></details></li>';
         });
         h += '</ol></section>';
       });
+      h += '<section class="p-set" id="p-diary"><div class="artist-head"><h2>My diary</h2><span class="sub">every session you’ve logged</span></div>' + diaryHtml(S.log, false) + '</section>';
     } else {
-      var all = r[1].data || [], members = (r[2].data || []).slice().sort(function (a, b) { return (a.name || a.email).localeCompare(b.name || b.email); });
+      var allLog = r[3].data || [], all = r[1].data || [], members = (r[2].data || []).slice().sort(function (a, b) { return (a.name || a.email).localeCompare(b.name || b.email); });
       var by = {}; all.forEach(function (p) { (by[p.email] = by[p.email] || {})[p.song_id] = p; });
       var songs = practiceSongs();
       var rows = members.map(function (m) {
         var mine = by[m.email] || {}, st = function (id) { return mine[id] ? mine[id].status : "none"; };
         var c = tally(st, songs), last = Object.keys(mine).map(function (k) { return mine[k].updated_at; }).sort().pop();
-        return { m: m, c: c, st: st, last: last, pct: c.total ? c.ready / c.total : 0 };
+        var wk = dayShift(localDay(), -6), logs = allLog.filter(function (l) { return l.email === m.email; });
+        var days7 = {}; logs.forEach(function (l) { if (l.day >= wk) days7[l.day] = 1; });
+        return { m: m, c: c, st: st, last: last, pct: c.total ? c.ready / c.total : 0, days7: Object.keys(days7).length, lastDay: logs.length ? logs[0].day : null };
       }).sort(function (a, b) { return b.pct - a.pct || b.c.almost - a.c.almost; });
       h += '<p class="muted" style="margin:6px 0 16px">Everyone’s own marks on the ' + songs.length + ' setlist songs the band plays. “Not my part” songs don’t count against anyone.</p>' +
-        '<div class="card p-card"><h3>By person</h3><div class="tablewrap"><table class="band act p-team"><thead><tr><th>Name</th><th>Progress</th><th>Ready</th><th>Almost</th><th>Learning</th><th>Not started</th><th>Updated</th></tr></thead><tbody>' +
+        '<div class="card p-card"><h3>By person</h3><div class="tablewrap"><table class="band act p-team"><thead><tr><th>Name</th><th>Progress</th><th>Ready</th><th>Almost</th><th>Learning</th><th>Not started</th><th>Practice days<br><small>last 7</small></th><th>Last practised</th><th>Updated</th></tr></thead><tbody>' +
         rows.map(function (x) {
           return '<tr><td><span class="dot off" data-online="' + esc(x.m.email) + '" aria-hidden="true"></span><b>' + esc(x.m.name || x.m.email) + '</b></td><td style="min-width:140px">' + stackBar(x.c) + '<div class="meta">' + Math.round(x.pct * 100) + '% show-ready</div></td>' +
-            '<td class="n">' + x.c.ready + '</td><td class="n">' + x.c.almost + '</td><td class="n">' + x.c.learning + '</td><td class="n">' + x.c.none + '</td><td>' + (x.last ? ago(x.last) : '<span class="muted">not yet</span>') + '</td></tr>';
+            '<td class="n">' + x.c.ready + '</td><td class="n">' + x.c.almost + '</td><td class="n">' + x.c.learning + '</td><td class="n">' + x.c.none + '</td><td class="n">' + x.days7 + '</td><td>' + (x.lastDay ? esc(dayLabel(x.lastDay)) : '<span class="muted">—</span>') + '</td><td>' + (x.last ? ago(x.last) : '<span class="muted">not yet</span>') + '</td></tr>';
         }).join("") + '</tbody></table></div></div>' +
         '<div class="card p-card" style="margin-top:20px"><h3>Songs that need the most work</h3><ol class="p-needs">' +
         songs.map(function (s) {
@@ -670,13 +855,16 @@
           var behind = x.who.filter(function (w) { return w.st !== "ready"; });
           return '<li><div class="ts-line"><a href="#/song/' + encodeURIComponent(x.s.id) + '">' + esc(x.s.title) + '</a><b>' + x.ready + '/' + x.who.length + ' ready</b></div>' +
             (behind.length ? '<div class="p-who">' + behind.map(function (w) { return '<span class="pmark ' + PR[w.st].cls + '">' + esc(w.name) + ' · ' + PR[w.st].label + '</span>'; }).join("") + '</div>' : '<div class="meta">Everyone is show-ready</div>') + '</li>';
-        }).join("") + '</ol></div>';
+        }).join("") + '</ol></div>' +
+        '<div class="card p-card" style="margin-top:20px"><h3>Recent practice</h3>' +
+        diaryHtml(allLog.slice(0, 80), true, function (e) { var m = members.find(function (x) { return x.email === e; }); return m ? (m.name || e) : e; }) + '</div>';
     }
     h += '</main>';
     app.innerHTML = h;
     bindHeader();
     app.querySelectorAll("[data-ptab]").forEach(function (b) { b.onclick = function () { PVIEW.tab = b.dataset.ptab; renderPractice(); }; });
     drawOnline();
+    if (rt.log) { var lf = document.getElementById("p-logform"); if (lf) lf.scrollIntoView({ block: "start" }); }
   }
 
   // ---------- who's online ----------
