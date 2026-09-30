@@ -1,0 +1,12 @@
+{
+  "name": "Messiah Tour Band Portal",
+  "short_name": "Band Portal",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#2A070D",
+  "theme_color": "#2A070D",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}
