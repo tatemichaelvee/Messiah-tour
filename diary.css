@@ -1,0 +1,40 @@
+/* ---------- practice diary ---------- */
+.p-flash{margin-top:16px;padding:12px 14px;border-radius:10px;background:var(--ok-soft);color:var(--ok);border:1px solid #BFE0CC;font-weight:700;font-size:15px}
+.p-top h3{margin:0}
+.p-strip{display:flex;gap:6px;flex-wrap:wrap}
+.p-day{display:grid;justify-items:center;gap:3px}
+.p-day i{width:22px;height:22px;border-radius:6px;background:var(--sunk);border:1px solid var(--line)}
+.p-day.on i{background:#1F9D5B;border-color:#1F9D5B}
+.p-day.today i{box-shadow:0 0 0 2px var(--surface),0 0 0 3px var(--fg)}
+.p-day small{font:500 10px var(--mono);color:var(--muted)}
+.p-logform{margin-top:16px;border:2px solid var(--fg)}
+.p-logform[hidden]{display:none}
+.lf-row{display:grid;gap:8px;padding:10px 0;border-top:1px solid var(--line)}
+.lf-row.two{grid-template-columns:1fr 2fr;gap:12px}
+.lf-row.two label{display:grid;gap:6px}
+.lf-row input[type=number],.lf-row input[type=text],.lf-date{font:15px var(--body);padding:9px 11px;border:1px solid var(--line);border-radius:8px;min-height:40px;width:100%;box-sizing:border-box;background:var(--surface);color:var(--fg)}
+.lf-date{width:auto}
+.lf-lab{font:700 12px var(--mono);text-transform:uppercase;letter-spacing:.06em;color:var(--fg)}
+.lf-lab em{font-style:normal;font-weight:500;color:var(--muted);text-transform:none;letter-spacing:0;margin-left:6px}
+.lf-chips{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.lf-chip{font:700 13px var(--body);min-height:38px;padding:7px 13px;border-radius:999px;border:1px solid var(--line);background:var(--surface);color:var(--fg);cursor:pointer}
+.lf-chip:hover{border-color:var(--fg)}
+.lf-chip[aria-pressed="true"]{background:var(--fg);border-color:var(--fg);color:#fff}
+.lf-chip.p-ready[aria-pressed="true"],.lf-chip.p-learn[aria-pressed="true"]{background:var(--pbg);border-color:var(--pc);color:var(--pfg);box-shadow:inset 0 0 0 1px var(--pc)}
+.lf-songs{display:grid;gap:10px}
+.lf-set small{display:block;font:500 11px var(--mono);color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:5px}
+.lf-foot{display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding-top:12px;border-top:1px solid var(--line)}
+.lf-msg{font-size:14px}
+.p-learnt{font-size:13px;color:var(--ok);font-weight:700}
+.p-dayhead{margin:18px 0 6px;font:700 13px var(--mono);text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
+.p-diary{list-style:none;margin:0;padding:0;display:grid}
+.p-diary li{padding:10px 0;border-bottom:1px solid var(--line);display:grid;gap:5px}
+.p-entry{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;font-size:15px}
+.p-entry .pmark{margin:0}
+.p-del{margin-left:auto;font-size:13px;color:var(--muted)}
+.p-entry-songs{display:flex;flex-wrap:wrap;gap:4px 12px;font-size:14px}
+.p-entry-note{font-size:14px}
+.p-songlog{margin-top:12px;display:grid;gap:8px}
+.p-songlog ul{margin:0;padding-left:18px;font-size:14px;display:grid;gap:3px}
+.p-logbtn{justify-self:start;text-decoration:none}
+@media (max-width:640px){.lf-row.two{grid-template-columns:1fr}.p-del{margin-left:0}}
