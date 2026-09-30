@@ -7,18 +7,13 @@
     auth: { persistSession: true, autoRefreshToken: true }
   });
   var BUCKET = CFG.bucket;
-  var ARTISTS = [
-    { name: "Michael Mahendere", short: "Michael", role: "Main set" },
-    { name: "Eleana Makombe", short: "Eleana", role: "Supporting set" },
-    { name: "Misheck Mahendere", short: "Misheck", role: "Supporting set" }
-  ];
   var MAX_UPLOAD = 1024 * 1024 * 1024; // 1 GB per file (Supabase Pro)
   var CHUNK = 6 * 1024 * 1024; // Supabase resumable uploads need exactly 6 MB chunks
 
   var app = document.getElementById("app");
   var S = {
     session: null, member: null, songs: [], tracks: [], notice: "",
-    q: "", artist: "all", loginMode: "signin", editing: false
+    q: "", set: "all", sets: [], loginMode: "signin", editing: false
   };
   var mixer = null;
 
@@ -140,12 +135,25 @@
     var r = await Promise.all([
       sb.from("songs").select("*").order("artist_order").order("set_order"),
       sb.from("tracks").select("*"),
-      sb.from("site_notice").select("body").eq("id", 1).maybeSingle()
+      sb.from("site_notice").select("body").eq("id", 1).maybeSingle(),
+      sb.from("sets").select("*").order("sort")
     ]);
     if (r[0].error) throw r[0].error;
     S.songs = r[0].data || [];
     S.tracks = (r[1].data) || [];
     S.notice = r[2].data ? r[2].data.body : "";
+    S.sets = r[3].data || [];
+  }
+  // The show's running order: songs grouped by set (from Michael's confirmed setlist).
+  // Songs with no set are kept in a separate "Not on the setlist" group at the end.
+  function setOf(song) { return S.sets.find(function (x) { return x.no === song.set_no; }) || null; }
+  function setGroups() {
+    var groups = S.sets.map(function (st) {
+      return { key: String(st.no), title: st.title, short: st.short, sub: st.subtitle || "", songs: S.songs.filter(function (s) { return s.set_no === st.no; }).sort(function (a, b) { return (a.set_order || 0) - (b.set_order || 0); }) };
+    }).filter(function (g) { return g.songs.length; });
+    var other = S.songs.filter(function (s) { return !setOf(s); }).sort(function (a, b) { return a.title.localeCompare(b.title); });
+    if (other.length) groups.push({ key: "other", title: "Not on the setlist", short: "Other", sub: "Kept here in case they come back in", songs: other, other: true });
+    return groups;
   }
   async function loadMember() {
     var email = S.session.user.email.toLowerCase();
@@ -252,7 +260,9 @@
 
   // ---------- library ----------
   function renderList() {
-    var total = S.songs.length, ready = S.songs.filter(function (s) { return status(s).cls === "ok"; }).length;
+    var inSet = S.songs.filter(function (s) { return setOf(s); });
+    var total = inSet.length, ready = inSet.filter(function (s) { return status(s).cls === "ok"; }).length;
+    if (S.set !== "all" && !setGroups().some(function (g) { return g.key === S.set; })) S.set = "all";
     var h = header(true) + '<main class="sheet">';
     if (isAdmin() && S.editing) {
       h += '<div class="card admin form"><span class="admin-tag">Admin</span><label class="f" for="notice">Note to the band<textarea id="notice">' + esc(S.notice) + '</textarea></label><div class="tp-row"><button class="btn primary" id="save-notice">Save note</button><button class="btn quiet" id="cancel-notice">Cancel</button></div></div>';
@@ -262,9 +272,9 @@
       h += '<button class="linkbtn" id="edit-notice">Add a note to the band</button>';
     }
     h += '<div class="finder"><input class="search" id="q" type="search" placeholder="Find a song or a lyric line" aria-label="Search songs and lyrics" value="' + esc(S.q) + '">' +
-      '<div class="chips" role="group" aria-label="Filter by artist"><button class="chip" data-artist="all" aria-pressed="' + (S.artist === "all") + '">All ' + total + '</button>' +
-      ARTISTS.map(function (a) { var n = S.songs.filter(function (s) { return s.artist === a.name; }).length; return '<button class="chip" data-artist="' + esc(a.name) + '" aria-pressed="' + (S.artist === a.name) + '">' + a.short + ' ' + n + '</button>'; }).join("") +
-      '<span class="progress">' + ready + '/' + total + ' ready</span></div></div><div id="list"></div>' +
+      '<div class="chips" role="group" aria-label="Filter by set"><button class="chip" data-set="all" aria-pressed="' + (S.set === "all") + '">All ' + S.songs.length + '</button>' +
+      setGroups().map(function (g) { return '<button class="chip' + (g.other ? ' other' : '') + '" data-set="' + g.key + '" aria-pressed="' + (S.set === g.key) + '">' + esc(g.short) + ' ' + g.songs.length + '</button>'; }).join("") +
+      '<span class="progress">' + ready + '/' + total + ' on the setlist ready</span></div></div><div id="list"></div>' +
       '<footer><span>“Ready” means stems and lyrics are in. “Partial” means some files are in.</span></footer></main>';
     app.innerHTML = h;
     bindHeader();
@@ -279,7 +289,7 @@
       if (a) S.autoplay = decodeURIComponent((a.getAttribute("href") || "").replace(/^#\/song\//, ""));
     });
     $("#q").oninput = function (e) { S.q = e.target.value; drawList(); };
-    app.querySelectorAll("[data-artist]").forEach(function (b) { b.onclick = function () { S.artist = b.dataset.artist; renderList(); }; });
+    app.querySelectorAll("[data-set]").forEach(function (b) { b.onclick = function () { S.set = b.dataset.set; renderList(); }; });
     var en = $("#edit-notice"); if (en) en.onclick = function () { S.editing = true; renderList(); };
     var cn = $("#cancel-notice"); if (cn) cn.onclick = function () { S.editing = false; renderList(); };
     var sn = $("#save-notice"); if (sn) sn.onclick = async function () {
@@ -292,20 +302,18 @@
   }
   function drawList() {
     var q = S.q.toLowerCase(), out = "", any = false;
-    ARTISTS.forEach(function (a) {
-      var all = S.songs.filter(function (s) { return s.artist === a.name; });
-      var list = all.filter(function (s) {
-        if (S.artist !== "all" && S.artist !== a.name) return false;
-        return !q || (s.title + " " + plainLyrics(s.lyrics)).toLowerCase().indexOf(q) > -1;
-      });
+    setGroups().forEach(function (g) {
+      if (S.set !== "all" && S.set !== g.key) return;
+      var list = g.songs.filter(function (s) { return !q || (s.title + " " + plainLyrics(s.lyrics)).toLowerCase().indexOf(q) > -1; });
       if (!list.length) return; any = true;
-      out += '<section class="artist"><div class="artist-head"><h2>' + esc(a.name) + '</h2><span class="sub">' + a.role + ' · ' + list.length + ' song' + (list.length > 1 ? "s" : "") + '</span></div><ol class="songs">';
+      out += '<section class="artist' + (g.other ? ' other' : '') + '"><div class="artist-head"><h2>' + esc(g.title) + '</h2><span class="sub">' + (g.sub ? esc(g.sub) + ' · ' : '') + list.length + ' song' + (list.length > 1 ? "s" : "") + '</span></div><ol class="songs">';
       list.forEach(function (s) {
         var st = status(s), meta = [s.key ? esc(s.key) : "", s.bpm ? s.bpm + " bpm" : ""].filter(Boolean).join(" · ");
+        var by = s.credit ? "orig. " + esc(s.credit) : esc(s.artist);
         out += '<li><a class="row" href="#/song/' + encodeURIComponent(s.id) + '" aria-label="Open ' + esc(s.title) + '">' +
           '<span class="thumb">' + (CFG.posterUrl ? '<img src="' + esc(CFG.posterUrl + (posterV ? "?v=" + posterV : "")) + '" alt="" loading="lazy" onerror="this.remove()">' : '') +
           '<span class="thumb-play" title="Play ' + esc(s.title) + '">' + ICON_THUMB + '</span></span>' +
-          '<span class="title-block"><span class="name">' + esc(s.title) + '</span><span class="by"><span class="num">' + String(all.indexOf(s) + 1).padStart(2, "0") + '</span> ' + esc(a.name) + (meta ? ' · ' + meta : '') + '</span></span>' +
+          '<span class="title-block"><span class="name">' + esc(s.title) + '</span><span class="by">' + (g.other ? '' : '<span class="num">' + String(g.songs.indexOf(s) + 1).padStart(2, "0") + '</span> ') + by + (meta ? ' · ' + meta : '') + '</span></span>' +
           '<span class="pill ' + st.cls + '">' + st.text + '</span></a></li>';
       });
       out += '</ol></section>';
@@ -322,7 +330,11 @@
     var facts = [];
     if (s.key) facts.push("<span>Key <b>" + esc(s.key) + "</b></span>");
     if (s.bpm) facts.push("<span>BPM <b>" + esc(s.bpm) + "</b></span>");
+    var sg = setOf(s);
+    if (sg) facts.unshift("<span>" + esc(sg.title) + " · <b>#" + (S.songs.filter(function (x) { return x.set_no === s.set_no && (x.set_order || 0) < (s.set_order || 0); }).length + 1) + "</b></span>");
+    else facts.unshift('<span>Not on the setlist</span>');
     facts.push("<span><b>" + esc(s.artist) + "</b></span>");
+    if (s.credit) facts.push("<span>Original by <b>" + esc(s.credit) + "</b></span>");
     var h = header() + '<main class="sheet">' +
       '<a class="back" href="#/"><span class="arr" aria-hidden="true">←</span> All songs</a>' +
       '<div class="songhead"><h1>' + esc(s.title) + '</h1><div class="facts">' + facts.join("") + '</div></div>' +
@@ -957,7 +969,10 @@
       '<span class="admin-tag">Admin · only you see this</span>' +
       '<div class="form"><div class="two">' +
       '<label class="f" for="a-key">Key<input id="a-key" value="' + esc(s.key || "") + '" placeholder="e.g. Bb"></label>' +
-      '<label class="f" for="a-bpm">BPM<input id="a-bpm" type="number" inputmode="numeric" value="' + esc(s.bpm || "") + '"></label></div>' +
+      '<label class="f" for="a-bpm">BPM<input id="a-bpm" type="number" inputmode="numeric" value="' + esc(s.bpm || "") + '"></label>' +
+      '<label class="f" for="a-set">Set<select id="a-set"><option value="">Not on the setlist</option>' + S.sets.map(function (x) { return '<option value="' + x.no + '"' + (s.set_no === x.no ? " selected" : "") + '>' + esc(x.title) + '</option>'; }).join("") + '</select></label>' +
+      '<label class="f" for="a-pos">Position in set<input id="a-pos" type="number" min="1" inputmode="numeric" value="' + esc(s.set_order || "") + '"></label>' +
+      '<label class="f" for="a-credit">Original artist (covers)<input id="a-credit" value="' + esc(s.credit || "") + '" placeholder="e.g. Victoria Orenze"></label></div>' +
       '<label class="f" for="a-bv">BV parts &amp; cues<textarea id="a-bv" style="min-height:220px">' + esc(s.bv_notes || "") + '</textarea></label>' +
       '<p class="muted" style="margin:0;font-size:13px">In the cues, colour a part by wrapping it: {{u|words}} for unison, {{h|words}} for harmony, {{i|words}} for inversion.</p>' +
       '<label class="f" for="a-lyrics">Lyrics<textarea id="a-lyrics" style="min-height:220px">' + esc(s.lyrics || "") + '</textarea></label>' +
@@ -977,7 +992,9 @@
     $("#a-save").onclick = async function () {
       var b = $("#a-save"); b.disabled = true;
       var bpm = parseInt($("#a-bpm").value, 10);
-      var patch = { key: $("#a-key").value.trim() || null, bpm: isFinite(bpm) ? bpm : null, bv_notes: $("#a-bv").value.trim() || null, lyrics: $("#a-lyrics").value.replace(/\s+$/, "") || null };
+      var pos = parseInt($("#a-pos").value, 10), setNo = parseInt($("#a-set").value, 10);
+      var patch = { set_no: isFinite(setNo) ? setNo : null, set_order: isFinite(pos) ? pos : (s.set_order || 0), credit: $("#a-credit").value.trim() || null,
+        key: $("#a-key").value.trim() || null, bpm: isFinite(bpm) ? bpm : null, bv_notes: $("#a-bv").value.trim() || null, lyrics: $("#a-lyrics").value.replace(/\s+$/, "") || null };
       var r = await sb.from("songs").update(patch).eq("id", s.id).select().single();
       b.disabled = false;
       if (r.error) { $("#a-save-msg").textContent = "Couldn't save: " + r.error.message; return; }
@@ -1155,7 +1172,7 @@
   // Pick or drop whole folders (or loose files). Each file is matched to a song by
   // its folder names first, then its file name ("Stems/02 Bako Rangu/Keys.wav" -> Bako).
   function norm(x) { return String(x || "").toLowerCase().replace(/\.[a-z0-9]+$/, "").replace(/[^a-z]/g, ""); }
-  var ALIASES = { "chiuyai": ["chiuyamweya", "chiuya"], "huvepo-hwenyu": ["muhuvepo", "huvepo"], "tawanirwa-nyasha": ["tawanirwe", "tawanirwa"], "salt": ["saltoftheearth"], "armour-of-god": ["armorofgod"], "ndinobuda": ["pakaoma"], "guta": ["rehutiziro"] };
+  var ALIASES = { "chiuyai": ["chiuyamweya", "chiuya"], "huvepo-hwenyu": ["muhuvepo", "huvepo"], "tawanirwa-nyasha": ["tawanirwe", "tawanirwa"], "salt": ["saltoftheearth"], "armour-of-god": ["armorofgod"], "ndinobuda": ["pakaoma"], "guta": ["rehutiziro"], "mweya-mutsvene": ["mweyamutsvene", "ndinokudai"], "covenant-keeping-god": ["covenantkeeping", "covenant"], "yahweh-sabaoth": ["yahwesabaoth", "sabaoth"], "heiyaya-chant": ["heiyaya"], "africa-for-jesus": ["africaforjesus"] };
   function matchName(name) {
     var f = norm(name), best = null, bestLen = 0;
     if (!f) return null;

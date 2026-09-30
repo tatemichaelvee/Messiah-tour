@@ -341,3 +341,8 @@ html.float-on #online-panel{max-height:calc(100vh - 200px)}
 .bar{height:8px;background:var(--sunk);border-radius:999px;overflow:hidden;margin:6px 0 4px}
 .bar span{display:block;height:100%;background:linear-gradient(90deg,var(--red),var(--red-deep));border-radius:999px}
 .topsongs .meta{white-space:normal}
+
+/* songs not on the confirmed setlist */
+section.artist.other .artist-head h2{color:var(--muted)}
+section.artist.other .row{opacity:.8}
+.chip.other{border-style:dashed}
