@@ -211,6 +211,9 @@ table.band th{font:700 11px var(--mono);letter-spacing:.06em;text-transform:uppe
 .title-block{display:grid;gap:3px;min-width:0}
 .by{font:500 13px/1.3 var(--body);color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .by .num{font-size:12px;margin-right:2px}
+/* play button pulses when the browser blocked auto-start */
+.play.nudge{animation:nudge 1.2s ease-in-out infinite}
+@keyframes nudge{0%,100%{box-shadow:0 0 0 0 rgba(255,255,255,.7)}50%{box-shadow:0 0 0 14px rgba(255,255,255,0)}}
 /* bulk upload */
 .dropzone{display:grid;gap:10px;justify-items:center;text-align:center;padding:28px 16px;border:2px dashed var(--line);border-radius:14px;background:var(--sunk);transition:border-color .2s ease,background-color .2s ease}
 .dropzone.over{border-color:var(--red);background:var(--red-soft)}
