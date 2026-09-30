@@ -233,6 +233,7 @@
     return '<header class="top' + (full ? '' : ' compact') + '">' +
       '<div class="topline"><div class="eyebrow">' + EYEBROW + '</div>' +
       '<div class="who"><span>' + esc(S.member.name || S.session.user.email) + '</span>' +
+      (isAdmin() ? '<button class="online-pill" id="online-pill" type="button" hidden aria-controls="online-panel" aria-expanded="false"><span class="dot on" aria-hidden="true"></span><span>online</span></button>' : '') +
       (isAdmin() ? '<a href="#/band">Band list</a><a href="#/upload">Bulk upload</a><a href="#/activity">Activity</a>' : '') +
       '<button class="linkbtn" id="signout">Sign out</button></div></div>' +
       (full ? '<div class="hero"><div class="hero-text">' +
@@ -243,7 +244,11 @@
       '</div>' + poster("hero-poster") + '</div>' : '<a class="brand" href="#/">Messiah Tour ' + TITLE + '</a>') +
       '</header>';
   }
-  function bindHeader() { var b = $("#signout"); if (b) b.onclick = function () { sb.auth.signOut(); }; }
+  function bindHeader() {
+    var b = $("#signout"); if (b) b.onclick = function () { sb.auth.signOut(); };
+    var op = $("#online-pill"); if (op) op.onclick = function () { presence.open = !presence.open; drawOnline(); };
+    drawOnline(); trackPresence();
+  }
 
   // ---------- library ----------
   function renderList() {
@@ -495,6 +500,112 @@
     if (win) win.location = r.data.signedUrl; else location.href = r.data.signedUrl;
   }
 
+  // ---------- who's online ----------
+  // Everyone signed in joins a private Realtime presence channel ("online"). Only band
+  // members can join it (database rule). Admins see the list: green dot = on the site now,
+  // grey = offline, with what they're playing or when they were last seen.
+  var presence = { ch: null, status: "", online: {}, members: [], summary: {}, left: {}, last: "", open: false, timer: 0 };
+  function startPresence() {
+    if (presence.ch || !S.session || !S.member) return;
+    var me = S.session.user.email.toLowerCase();
+    var ch = sb.channel("online", { config: { private: true, presence: { key: me } } });
+    presence.ch = ch;
+    ch.on("presence", { event: "sync" }, function () { presence.online = ch.presenceState(); drawOnline(); });
+    ch.on("presence", { event: "leave" }, function (e) { if (e && e.key) presence.left[e.key] = new Date().toISOString(); });
+    ch.subscribe(function (st) { presence.status = st; if (st === "SUBSCRIBED") trackPresence(true); drawOnline(); });
+    if (isAdmin()) { loadPresenceMembers(); presence.timer = setInterval(loadPresenceMembers, 120000); }
+  }
+  function stopPresence() {
+    clearInterval(presence.timer);
+    if (presence.ch) { try { sb.removeChannel(presence.ch); } catch (e) {} }
+    presence.ch = null; presence.status = ""; presence.online = {}; presence.last = "";
+    var p = document.getElementById("online-panel"); if (p) p.remove();
+    document.documentElement.classList.remove("online-side");
+  }
+  async function loadPresenceMembers() {
+    var r = await Promise.all([sb.from("band_members").select("email,name,role"), sb.rpc("admin_activity_summary")]);
+    presence.members = r[0].data || [];
+    presence.summary = {}; (r[1].data || []).forEach(function (m) { presence.summary[m.email] = m; });
+    drawOnline();
+  }
+  // tell everyone what this person is doing (only sent when it changes)
+  function trackPresence(force) {
+    if (!presence.ch || presence.status !== "SUBSCRIBED") return;
+    var m = active && !active.dead ? active : null, r = route(), page = "";
+    if (r.view === "song") { var s = S.songs.find(function (x) { return x.id === r.id; }); page = s ? s.title : ""; }
+    var st = { name: S.member.name || "", song: m ? m.title : "", playing: !!(m && m.playing), page: page };
+    var key = JSON.stringify(st);
+    if (!force && key === presence.last) return;
+    presence.last = key;
+    presence.ch.track(st);
+  }
+  function onlineNow() {
+    var out = {};
+    Object.keys(presence.online || {}).forEach(function (k) {
+      var metas = presence.online[k] || [];
+      if (!metas.length) return;
+      out[k] = metas.find(function (x) { return x.playing; }) || metas.find(function (x) { return x.page; }) || metas[0];
+    });
+    return out;
+  }
+  function onlineRows() {
+    var on = onlineNow(), seen = {};
+    var rows = presence.members.map(function (m) { seen[m.email] = 1; return { email: m.email, name: m.name || m.email, role: m.role, on: on[m.email] || null }; });
+    Object.keys(on).forEach(function (k) { if (!seen[k]) rows.push({ email: k, name: on[k].name || k, on: on[k] }); });
+    rows.forEach(function (r) {
+      var sm = presence.summary[r.email] || {};
+      var lastSeen = [sm.last_seen, sm.last_sign_in, presence.left[r.email]].filter(Boolean).sort().pop();
+      r.what = r.on ? (r.on.playing ? "▶ " + r.on.song : r.on.page ? "Viewing " + r.on.page : "On the site")
+        : lastSeen ? "Seen " + ago(lastSeen) : sm.has_account === false ? "No account yet" : "Not seen yet";
+    });
+    rows.sort(function (a, b) { return (!!b.on - !!a.on) || a.name.localeCompare(b.name); });
+    return rows;
+  }
+  function drawOnline() {
+    if (!isAdmin() || !presence.ch) return;
+    var rows = onlineRows(), n = rows.filter(function (r) { return r.on; }).length;
+    var pill = document.getElementById("online-pill");
+    if (pill) { pill.hidden = false; pill.querySelector("span:last-child").textContent = n + " online"; pill.setAttribute("aria-expanded", String(presence.open)); }
+    var p = document.getElementById("online-panel");
+    if (!p) {
+      p = document.createElement("aside");
+      p.id = "online-panel"; p.setAttribute("aria-label", "Who's online");
+      document.body.appendChild(p);
+      document.addEventListener("click", function (e) {
+        if (!presence.open) return;
+        if (e.target.closest && (e.target.closest("#online-panel") || e.target.closest("#online-pill"))) return;
+        presence.open = false; drawOnline();
+      });
+    }
+    document.documentElement.classList.add("online-side");
+    p.classList.toggle("open", presence.open);
+    p.innerHTML = '<div class="op-head"><strong>Band online</strong><span>' + n + ' of ' + rows.length + '</span></div>' +
+      (presence.status && presence.status !== "SUBSCRIBED" ? '<p class="op-note">Connecting…</p>' : '') +
+      '<ul>' + rows.map(function (r) {
+        return '<li class="' + (r.on ? "is-on" : "") + '"><span class="dot ' + (r.on ? "on" : "off") + '" aria-hidden="true"></span>' +
+          '<span class="op-who"><b>' + esc(r.name) + '</b><span>' + esc(r.what) + '</span></span></li>';
+      }).join("") + '</ul>';
+    p.querySelectorAll("li").forEach(function (li, i) { li.title = rows[i].email + (rows[i].on ? " · online now" : " · offline"); });
+    // live dots on the Activity page
+    document.querySelectorAll("[data-online]").forEach(function (d) { var on = !!onlineNow()[d.dataset.online]; d.className = "dot " + (on ? "on" : "off"); d.title = on ? "Online now" : "Offline"; });
+  }
+
+  // ---------- listening time ----------
+  // Each time someone plays a song, one row in `listens` counts the seconds it actually
+  // played (paused and buffering time don't count). Saved every 20 s and on pause/leave.
+  function uuid() {
+    if (window.crypto && crypto.randomUUID) return crypto.randomUUID();
+    return "10000000-1000-4000-8000-100000000000".replace(/[018]/g, function (c) { return (c ^ (Math.random() * 16) >> (c / 4)).toString(16); });
+  }
+  function fmtDur(s) {
+    s = Math.round(s || 0);
+    if (s < 60) return s + " s";
+    var h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60);
+    return h ? h + " h " + (m ? m + " m" : "") : m + " m" + (s % 60 && m < 10 ? " " + (s % 60) + " s" : "");
+  }
+  document.addEventListener("visibilitychange", function () { if (document.hidden && active) active.saveListen(); });
+  window.addEventListener("pagehide", function () { if (active) active.saveListen(); });
+
   // ---------- mixer engine ----------
   // One <audio> element per track, all routed through Web Audio gain nodes so
   // mute, solo and volume work on phones too. Elements stream, so long stems
@@ -633,8 +744,31 @@
     if (this.dead) return;
     if (res.indexOf(false) > -1) return this.blocked();
     if (!this.playLogged) { this.playLogged = true; if (this.onFirstPlay) this.onFirstPlay(); }
+    this.startListen();
     mediaSession(this);
     this.loop();
+  };
+  Mixer.prototype.startListen = function () {
+    var self = this;
+    if (!this.listen) this.listen = { id: uuid(), secs: 0, saved: 0, created: false };
+    if (this.listenTimer) return;
+    var last = Date.now();
+    this.listenTimer = setInterval(function () {
+      var now = Date.now(), dt = Math.min((now - last) / 1000, 2); last = now;
+      if (self.dead) return;
+      if (self.playing && !self.stalled) self.listen.secs += dt;
+      if (self.listen.secs - self.listen.saved >= 20) self.saveListen();
+    }, 1000);
+  };
+  Mixer.prototype.saveListen = function () {
+    var L = this.listen; if (!L || !S.member) return;
+    var secs = Math.min(Math.round(L.secs), 43200);
+    if (secs < 3 || secs === L.saved) return;
+    L.saved = secs;
+    if (!L.created) {
+      L.created = true;
+      sb.from("listens").insert({ id: L.id, song_id: this.songId, seconds: secs }).then(function (r) { if (r && r.error) { L.created = false; L.saved = 0; } }, function () { L.created = false; L.saved = 0; });
+    } else sb.from("listens").update({ seconds: secs, updated_at: new Date().toISOString() }).eq("id", L.id).then(function () {}, function () {});
   };
   Mixer.prototype.toggle = function () { if (this.playing) this.pause(); else this.play(); };
   // The browser refused to start sound without a direct tap (mostly Safari). Ask for one tap.
@@ -646,6 +780,7 @@
   };
   Mixer.prototype.pause = function () {
     this.playing = false; this.stalled = false; clearInterval(this.stallTimer); this.setIcon();
+    this.saveListen();
     this.tracks.forEach(function (t) { if (t.el) t.el.pause(); });
     cancelAnimationFrame(this.raf); this.tick(true);
   };
@@ -737,6 +872,7 @@
     document.querySelectorAll("[data-vol]").forEach(function (r) { r.oninput = function () { self.tracks[+r.dataset.vol].vol = parseFloat(r.value); self.applyGains(); }; });
   };
   Mixer.prototype.destroy = function () {
+    this.saveListen(); clearInterval(this.listenTimer);
     this.dead = true; this.playing = false; clearInterval(this.stallTimer); cancelAnimationFrame(this.raf);
     this.detach();
     if (active === this) active = null;
@@ -787,6 +923,7 @@
     }
   }
   function floatUpdate() {
+    trackPresence();
     var m = floatTarget();
     var show = !!m && !floatDismissed && (!m.attached || !transportVisible || !!viewer);
     if (!show && !document.getElementById("mt-float-player")) { document.documentElement.classList.remove("float-on"); return; }
@@ -943,31 +1080,64 @@
 
   // ---------- admin: activity ----------
   var EVENT_TEXT = { sign_in: "signed in", visit: "opened the portal", song: "opened", play: "pressed play on" };
+  var STAT = { days: 30, admins: false };
   async function renderActivity() {
     app.innerHTML = header() + '<main class="sheet"><a class="back" href="#/"><span class="arr" aria-hidden="true">←</span> All songs</a><p class="muted">Loading activity…</p></main>';
     bindHeader();
     var r = await Promise.all([
       sb.rpc("admin_activity_summary"),
       sb.from("activity").select("*").order("created_at", { ascending: false }).limit(150),
-      sb.from("band_members").select("email,name")
+      sb.from("band_members").select("email,name"),
+      sb.rpc("admin_listen_stats", { days: STAT.days, include_admins: STAT.admins })
     ]);
     if (route().view !== "activity") return;
     var names = {}; (r[2].data || []).forEach(function (m) { names[m.email] = m.name || m.email; });
     var titles = {}; S.songs.forEach(function (s) { titles[s.id] = s.title; });
     var sum = r[0].data || [], feed = r[1].data || [];
-    var err = r[0].error || r[1].error;
+    var st = r[3].data || { totals: {}, songs: [], people: [], recent: [] };
+    var err = r[0].error || r[1].error || r[3].error;
+    var dot = function (email) { return '<span class="dot off" data-online="' + esc(email) + '" aria-hidden="true"></span>'; };
+    var t = st.totals || {}, maxSong = Math.max.apply(null, (st.songs || []).map(function (x) { return x.seconds; }).concat([1]));
+    var range = [[7, "7 days"], [30, "30 days"], [0, "All time"]];
+
     var h = header() + '<main class="sheet"><a class="back" href="#/"><span class="arr" aria-hidden="true">←</span> All songs</a>' +
-      '<div class="card admin"><span class="admin-tag">Admin</span><h2>Who’s using the portal</h2>' +
-      (err ? '<div class="msg err">' + esc(err.message) + '</div>' : '') +
+      (err ? '<div class="msg err" style="margin-bottom:16px">' + esc(err.message) + '</div>' : '') +
+
+      // listening stats
+      '<div class="card admin"><span class="admin-tag">Admin</span>' +
+      '<div class="stat-head"><h2>Listening stats</h2><div class="stat-controls"><span class="seg dark" role="group" aria-label="Time range">' +
+      range.map(function (x) { return '<button data-days="' + x[0] + '" aria-pressed="' + (STAT.days === x[0]) + '">' + x[1] + '</button>'; }).join("") + '</span>' +
+      '<label class="chk"><input type="checkbox" id="st-admins"' + (STAT.admins ? " checked" : "") + '> Include admins</label></div></div>' +
+      '<div class="tiles"><div class="tile"><b>' + fmtDur(t.seconds) + '</b><span>listened</span></div><div class="tile"><b>' + (t.sessions || 0) + '</b><span>plays</span></div>' +
+      '<div class="tile"><b>' + (t.listeners || 0) + '</b><span>people listening</span></div><div class="tile"><b>' + (t.songs || 0) + '</b><span>songs played</span></div></div>' +
+      '<div class="stat-grid"><section><h3>Top songs</h3>' +
+      ((st.songs || []).length ? '<ol class="topsongs">' + st.songs.map(function (x, i) {
+        return '<li><span class="rank">' + (i + 1) + '</span><div class="ts-main"><div class="ts-line"><a href="#/song/' + encodeURIComponent(x.song_id) + '">' + esc(x.title) + '</a><b>' + fmtDur(x.seconds) + '</b></div>' +
+          '<div class="bar"><span style="width:' + Math.max(2, Math.round(x.seconds / maxSong * 100)) + '%"></span></div>' +
+          '<div class="meta">' + x.sessions + ' play' + (x.sessions === 1 ? "" : "s") + ' · ' + x.listeners + ' ' + (x.listeners === 1 ? "person" : "people") + ' · avg ' + fmtDur(x.avg_seconds) + ' a play · last ' + ago(x.last_played) + '</div></div></li>';
+      }).join("") + '</ol>' : '<p class="empty">No listening yet in this range. Stats start counting from today’s update, whenever someone presses play.</p>') +
+      '</section><section><h3>Who’s listening most</h3>' +
+      ((st.people || []).length ? '<div class="tablewrap"><table class="band act"><thead><tr><th>Name</th><th>Time</th><th>Plays</th><th>Most played</th><th>Last</th></tr></thead><tbody>' +
+        st.people.map(function (p) {
+          return '<tr><td>' + dot(p.email) + '<b>' + esc(p.name) + '</b></td><td class="n">' + fmtDur(p.seconds) + '</td><td class="n">' + p.sessions + '</td><td>' + esc(p.top_song || "") + '<div class="meta">' + p.songs + ' song' + (p.songs === 1 ? "" : "s") + '</div></td><td>' + ago(p.last_played) + '</td></tr>';
+        }).join("") + '</tbody></table></div>' : '<p class="empty">Nobody yet.</p>') +
+      '</section></div>' +
+      ((st.recent || []).length ? '<section><h3>Recent listening</h3><ul class="feed">' + st.recent.map(function (x) {
+        return '<li><span class="feed-time" title="' + esc(when(x.started_at)) + '">' + ago(x.started_at) + '</span><span><b>' + esc(x.name) + '</b> played <a href="#/song/' + encodeURIComponent(x.song_id) + '">' + esc(x.title) + '</a> for ' + fmtDur(x.seconds) + '</span></li>';
+      }).join("") + '</ul></section>' : '') +
+      '<p class="muted" style="margin:0;font-size:13px">Time counts only while a song is actually playing (not paused or buffering). A “play” is one listen from pressing play until they leave the song.</p></div>' +
+
+      // accounts
+      '<div class="card admin" style="margin-top:20px"><span class="admin-tag">Admin</span><h2>Who’s using the portal</h2>' +
       '<div class="tablewrap"><table class="band act"><thead><tr><th>Name</th><th>Account</th><th>Last sign-in</th><th>Last active</th><th>Visits (7 days)</th><th>Songs opened</th><th>Plays</th></tr></thead><tbody>' +
       sum.map(function (m) {
-        return '<tr><td><b>' + esc(m.name || m.email) + '</b><div class="meta">' + esc(m.email) + '</div></td>' +
+        return '<tr><td>' + dot(m.email) + '<b>' + esc(m.name || m.email) + '</b><div class="meta">' + esc(m.email) + '</div></td>' +
           '<td>' + (m.has_account ? '<span class="pill ok">Created</span>' : '<span class="pill none">Not yet</span>') + '</td>' +
           '<td title="' + esc(when(m.last_sign_in)) + '">' + ago(m.last_sign_in) + '</td>' +
           '<td title="' + esc(when(m.last_seen)) + '">' + ago(m.last_seen) + '</td>' +
           '<td class="n">' + m.visits_7d + '</td><td class="n">' + m.songs_7d + '</td><td class="n">' + m.plays_7d + '</td></tr>';
       }).join("") + '</tbody></table></div>' +
-      '<p class="muted" style="margin:0;font-size:13px">Last sign-in comes from the login system. Visits, songs opened and plays are counted from when activity logging started.</p></div>' +
+      '<p class="muted" style="margin:0;font-size:13px">Green dot = on the portal right now. Last sign-in comes from the login system. Visits, songs opened and plays are counted from when activity logging started.</p></div>' +
       '<div class="card admin" style="margin-top:20px"><span class="admin-tag">Admin</span><h2>Recent activity</h2>' +
       (feed.length ? '<ul class="feed">' + feed.map(function (a) {
         return '<li><span class="feed-time" title="' + esc(when(a.created_at)) + '">' + ago(a.created_at) + '</span><span><b>' + esc(names[a.email] || a.email) + '</b> ' + (EVENT_TEXT[a.event] || a.event) +
@@ -976,6 +1146,9 @@
       '</div></main>';
     app.innerHTML = h;
     bindHeader();
+    app.querySelectorAll("[data-days]").forEach(function (b) { b.onclick = function () { STAT.days = +b.dataset.days; renderActivity(); }; });
+    var ca = $("#st-admins"); if (ca) ca.onchange = function () { STAT.admins = ca.checked; renderActivity(); };
+    drawOnline();
   }
 
   // ---------- admin: bulk upload ----------
@@ -1119,13 +1292,14 @@
   // ---------- boot ----------
   async function onSession(session) {
     S.session = session;
-    if (!session) { S.member = null; S.loggedVisit = false; render(); return; }
+    if (!session) { S.member = null; S.loggedVisit = false; stopPresence(); render(); return; }
     try {
       await loadMember();
       if (S.member) {
         await loadAll();
         if (!S.loggedVisit) { S.loggedVisit = true; logEvent(S.justSignedIn ? "sign_in" : "visit"); }
         S.justSignedIn = false;
+        startPresence();
       }
     } catch (e) {
       app.innerHTML = '<div class="login card"><h2>Couldn’t load the library</h2><p>' + esc(e.message || e) + '</p><button class="btn" onclick="location.reload()">Try again</button></div>';
