@@ -361,7 +361,10 @@
     var s = S.songs.find(function (x) { return x.id === id; });
     if (!s) { app.innerHTML = header() + '<main class="sheet"><p>That song isn’t in the library. <a href="#/">Back to all songs</a></p></main>'; bindHeader(); return; }
     var stems = tracksFor(id, "stem"), guides = tracksFor(id, "guide"), charts = tracksFor(id, "chart");
-    var mixTracks = stems.concat(guides);
+    var mixTracks = audioTracks(id);
+    // a mixer that's already loaded for this song keeps its own order, so rows line up with it
+    var live = [mixer, active].filter(function (m) { return m && !m.dead && m.songId === id && m.sig === trackSig(mixTracks); })[0];
+    if (live) mixTracks = live.tracks.map(function (t) { return t.meta; });
     var facts = [];
     if (s.key) facts.push("<span>Key <b>" + esc(s.key) + "</b></span>");
     if (s.bpm) facts.push("<span>BPM <b>" + esc(s.bpm) + "</b></span>");
@@ -376,11 +379,11 @@
       '<div class="songgrid"><div class="col-main">';
 
     // mixer
-    h += '<div class="block"><h3>Practice mixer</h3>';
+    h += '<div class="block"><div class="mix-head"><h3>Practice mixer</h3>' + (isAdmin() && mixTracks.length > 1 ? '<button class="linkbtn" id="reorder-btn" aria-pressed="' + !!S.reorder + '">' + (S.reorder ? 'Done reordering' : 'Reorder stems') + '</button>' : '') + '</div>';
     if (!mixTracks.length) {
       h += '<p class="empty">No audio uploaded for this song yet.</p>';
     } else {
-      h += '<div class="desk">' +
+      h += '<div class="desk' + (S.reorder && isAdmin() ? ' reordering' : '') + '">' +
         '<div class="transport">' +
         '<div class="tp-row"><button class="play" id="play" aria-label="Play" disabled>' + ICON_PLAY + '</button>' +
         '<span class="clock" id="clock">0:00 / 0:00</span>' +
@@ -397,7 +400,9 @@
         '<div class="loadbar" id="loadbar">Loading audio…</div>' +
         '</div><div class="tracks" id="tracks">' +
         mixTracks.map(function (t, i) {
-          return '<div class="trk" data-i="' + i + '"><span class="tname"><span class="tkind">' + (t.kind === "guide" ? "Guide mix" : "Stem") + '</span>' + esc(t.label) + '</span>' +
+          return '<div class="trk" data-i="' + i + '">' +
+            (S.reorder && isAdmin() ? '<span class="mv"><button type="button" data-mv="' + i + '" data-dir="-1" aria-label="Move ' + esc(t.label) + ' up"' + (i === 0 ? ' disabled' : '') + '>↑</button><button type="button" data-mv="' + i + '" data-dir="1" aria-label="Move ' + esc(t.label) + ' down"' + (i === mixTracks.length - 1 ? ' disabled' : '') + '>↓</button></span>' : '') +
+            '<span class="tname"><span class="tkind">' + (t.kind === "guide" ? "Guide mix" : "Stem") + '</span>' + esc(t.label) + '</span>' +
             '<span class="ms"><button class="m" data-mute="' + i + '" aria-pressed="false" aria-label="Mute ' + esc(t.label) + '">M</button><button class="s" data-solo="' + i + '" aria-pressed="false" aria-label="Solo ' + esc(t.label) + '">S</button><button class="p" data-part="' + i + '" aria-pressed="false" aria-label="My part: ' + esc(t.label) + '" title="This is my part">★</button></span>' +
             '<input type="range" min="0" max="1" step="0.01" value="1" data-vol="' + i + '" aria-label="Volume ' + esc(t.label) + '">' +
             (isAdmin() ? '<button class="linkbtn dl" data-dl="' + esc(t.id) + '">Download</button>' : '<span class="dl" aria-hidden="true"></span>') + '</div>';
@@ -428,7 +433,7 @@
 
     // Reuse the live mixer if this song is already loaded or playing, so the page and the
     // floating player stay on the same audio. Otherwise start a fresh one.
-    var sig = mixTracks.map(function (t) { return t.id; }).join(",");
+    var sig = trackSig(mixTracks);
     if (mixer && (mixer.songId !== id || mixer.sig !== sig)) leavePage();
     if (active && active.songId === id && active.sig !== sig) active.destroy();
     if (mixTracks.length) {
@@ -451,6 +456,29 @@
       };
     });
     if (isAdmin()) bindAdminSong(s);
+    var rb = $("#reorder-btn"); if (rb) rb.onclick = function () { S.reorder = !S.reorder; renderSong(id); };
+    app.querySelectorAll("[data-mv]").forEach(function (b) { b.onclick = function () { moveTrack(id, +b.dataset.mv, +b.dataset.dir); }; });
+  }
+  // Stems and guide mixes play in one admin-set order (tracks.sort), the same for everyone.
+  function audioTracks(id) {
+    return S.tracks.filter(function (t) { return t.song_id === id && (t.kind === "stem" || t.kind === "guide"); })
+      .sort(function (a, b) { return (a.sort || 0) - (b.sort || 0) || (a.kind === b.kind ? 0 : a.kind === "stem" ? -1 : 1) || (a.created_at < b.created_at ? -1 : 1); });
+  }
+  function trackSig(list) { return list.map(function (t) { return t.id; }).sort().join(","); }
+  function nextSort(songId) { var a = audioTracks(songId); return a.length ? Math.max.apply(null, a.map(function (t) { return t.sort || 0; })) + 1 : 0; }
+  async function moveTrack(songId, i, dir) {
+    var m = mixer && mixer.songId === songId ? mixer : null;
+    var list = m ? m.tracks.map(function (t) { return t.meta; }) : audioTracks(songId), j = i + dir;
+    if (j < 0 || j >= list.length) return;
+    if (m) { var tmp = m.tracks[i]; m.tracks[i] = m.tracks[j]; m.tracks[j] = tmp; }
+    var x = list[i]; list[i] = list[j]; list[j] = x;
+    var changed = [];
+    list.forEach(function (t, k) { if (t.sort !== k) { t.sort = k; changed.push(t); } });
+    renderSong(songId);
+    var again = app.querySelector('[data-mv="' + j + '"][data-dir="' + dir + '"]') || app.querySelector('[data-mv="' + j + '"]'); if (again) again.focus();
+    var res = await Promise.all(changed.map(function (t) { return sb.from("tracks").update({ sort: t.sort }).eq("id", t.id); }));
+    var bad = res.filter(function (r) { return r.error; })[0];
+    if (bad) alert("Couldn't save the new order: " + bad.error.message);
   }
 
   // ---------- full-screen sheet viewer ----------
@@ -975,7 +1003,15 @@
     var h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60);
     return h ? h + " h " + (m ? m + " m" : "") : m + " m" + (s % 60 && m < 10 ? " " + (s % 60) + " s" : "");
   }
-  document.addEventListener("visibilitychange", function () { if (document.hidden && active) active.saveListen(); });
+  document.addEventListener("visibilitychange", function () {
+    if (!active) return;
+    if (document.hidden) { active.saveListen(); return; }
+    // back in the app: wake the audio engine if the phone paused it, and redraw
+    var m = active;
+    if (m.playing && m.ctx && m.ctx.state !== "running") { try { m.ctx.resume().catch(function () {}); } catch (e) {} }
+    if (m.playing) { m.sync(m.now()); m.loop(); }
+    m.tick(true);
+  });
   window.addEventListener("pagehide", function () { if (active) active.saveListen(); });
 
   // ---------- mixer engine ----------
@@ -993,7 +1029,7 @@
       return { meta: t, el: null, gain: null, vol: 1, mute: t.kind === "guide" && hasStems, solo: false, ready: false };
     });
     this.songId = song.id; this.title = song.title;
-    this.sig = tracks.map(function (t) { return t.id; }).join(",");
+    this.sig = trackSig(tracks);
     this.ctx = null; this.playing = false; this.rate = 1; this.loopA = null; this.loopB = null;
     this.duration = 0; this.raf = 0; this.lastSync = 0; this.dead = false; this.seeking = false;
     this.attached = false; this.loadMsg = "Loading audio…";
@@ -1031,7 +1067,7 @@
         if (!t.retried && urlCache[t.meta.path]) { t.retried = true; delete urlCache[t.meta.path]; signedUrls([t.meta.path]).then(function (r2) { if (!self.dead && r2.data && r2.data[t.meta.path]) { el.src = r2.data[t.meta.path]; el.load(); } }); return; }
         self.setLoad("One track failed to load (" + t.meta.label + "). The rest will still play."); t.ready = true; t.broken = true; self.updateLoad();
       });
-      el.addEventListener("ended", function () { if (i !== self.master() || self.loopOn()) return; if (self.repeat && self.playing) self.play(); else self.pause(); });
+      el.addEventListener("ended", function () { if (self.tracks[self.master()] !== t || self.loopOn()) return; if (self.repeat && self.playing) self.play(); else self.pause(); });
       // one stem ran out of downloaded audio: hold everything until it catches up
       el.addEventListener("waiting", function () {
         if (!self.playing || t.broken || el.ended || Date.now() - (t.lastSeek || 0) < 1500) return;
@@ -1212,6 +1248,9 @@
     // Only one song plays at a time: starting this one stops the one that was playing.
     if (active && active !== this) { var old = active; active = null; old.destroy(); }
     active = this; floatDismissed = false;
+    // iPhone/iPad: a "playback" audio session keeps the mix going with the screen locked or
+    // in another app (iOS 17.5+), in Safari and in the home-screen app.
+    try { if (navigator.audioSession && navigator.audioSession.type !== "playback") navigator.audioSession.type = "playback"; } catch (e) {}
     this.ensureGraph();
     if (this.ctx && this.ctx.state === "suspended") { try { await this.ctx.resume(); } catch (e) {} }
     if (auto && this.ctx && this.ctx.state !== "running") return this.blocked();
@@ -1228,6 +1267,21 @@
     this.startListen();
     mediaSession(this);
     this.loop();
+    this.bgLoop();
+  };
+  // requestAnimationFrame stops while the page is in the background, so a slower timer keeps
+  // section repeat and stem sync going when you're in another app or the screen is locked.
+  Mixer.prototype.bgLoop = function () {
+    var self = this;
+    clearInterval(this.bgTimer);
+    this.bgTimer = setInterval(function () {
+      if (!self.playing || self.dead) { clearInterval(self.bgTimer); return; }
+      if (!document.hidden) return;
+      var now = self.now();
+      if (self.loopOn() && now >= self.loopB - 0.15) self.seek(self.loopA);
+      else if (!self.stalled) self.sync(now);
+      posState(self);
+    }, 200);
   };
   Mixer.prototype.startListen = function () {
     var self = this;
@@ -1260,7 +1314,7 @@
     var p = this.$("play"); if (p) { p.classList.add("nudge"); p.focus(); }
   };
   Mixer.prototype.pause = function () {
-    this.playing = false; this.stalled = false; clearInterval(this.stallTimer); this.setIcon();
+    this.playing = false; this.stalled = false; clearInterval(this.stallTimer); clearInterval(this.bgTimer); this.setIcon();
     this.saveListen();
     this.tracks.forEach(function (t) { if (t.el) t.el.pause(); });
     cancelAnimationFrame(this.raf); this.tick(true);
@@ -1273,6 +1327,7 @@
   Mixer.prototype.setIcon = function () {
     var p = this.$("play");
     if (p) { p.innerHTML = this.playing ? ICON_PAUSE : ICON_PLAY; p.setAttribute("aria-label", this.playing ? "Pause" : "Play"); }
+    if (this === active && "mediaSession" in navigator) { try { navigator.mediaSession.playbackState = this.playing ? "playing" : "paused"; } catch (e) {} posState(this); }
     floatUpdate();
   };
   Mixer.prototype.loop = function () {
@@ -1368,7 +1423,7 @@
   };
   Mixer.prototype.destroy = function () {
     this.saveListen(); clearInterval(this.listenTimer);
-    this.dead = true; this.playing = false; clearInterval(this.stallTimer); cancelAnimationFrame(this.raf);
+    this.dead = true; this.playing = false; clearInterval(this.stallTimer); clearInterval(this.bgTimer); cancelAnimationFrame(this.raf);
     this.detach();
     if (active === this) active = null;
     this.tracks.forEach(function (t) { if (t.el) { t.el.pause(); t.el.removeAttribute("src"); t.el.load(); } });
@@ -1535,16 +1590,22 @@
     peakQueue = peakQueue.then(function () { return MTWave.sample(MTWave.fileReader(file)).then(function (res) { return savePeaks(track, res); }); })
       .catch(function () {}).then(function () { delete peaksBuilding[track.id]; peaksChanged(); });
   }
+  // lock-screen position bar
+  function posState(m) {
+    if (!("mediaSession" in navigator) || !navigator.mediaSession.setPositionState || !m.duration) return;
+    try { navigator.mediaSession.setPositionState({ duration: m.duration, playbackRate: m.rate, position: Math.min(m.duration, Math.max(0, m.now())) }); } catch (e) {}
+  }
   function mediaSession(m) {
     if (!("mediaSession" in navigator)) return;
     try {
-      navigator.mediaSession.metadata = new MediaMetadata({ title: m.title, artist: "Messiah Tour Canada", album: "Band Portal" });
+      navigator.mediaSession.metadata = new MediaMetadata({ title: m.title, artist: "Messiah Tour Canada", album: "Band Portal", artwork: CFG.posterUrl ? [{ src: CFG.posterUrl, sizes: "512x512", type: "image/jpeg" }] : [] });
       var go = function (f) { return function (d) { var t = floatTarget(); if (t) f(t, d || {}); }; };
       navigator.mediaSession.setActionHandler("play", go(function (t) { t.play(); }));
       navigator.mediaSession.setActionHandler("pause", go(function (t) { t.pause(); }));
-      navigator.mediaSession.setActionHandler("seekbackward", go(function (t, d) { t.seek(t.now() - (d.seekOffset || 10)); }));
-      navigator.mediaSession.setActionHandler("seekforward", go(function (t, d) { t.seek(t.now() + (d.seekOffset || 10)); }));
-      navigator.mediaSession.setActionHandler("seekto", go(function (t, d) { if (d.seekTime != null) t.seek(d.seekTime); }));
+      navigator.mediaSession.setActionHandler("seekbackward", go(function (t, d) { t.seek(t.now() - (d.seekOffset || 10)); posState(t); }));
+      navigator.mediaSession.setActionHandler("seekforward", go(function (t, d) { t.seek(t.now() + (d.seekOffset || 10)); posState(t); }));
+      navigator.mediaSession.setActionHandler("seekto", go(function (t, d) { if (d.seekTime != null) t.seek(d.seekTime); posState(t); }));
+      posState(m);
     } catch (e) {}
   }
 
@@ -1591,7 +1652,7 @@
       var files = Array.from($("#a-files").files || []), kind = $("#a-kind").value, log = $("#a-uplog");
       if (!files.length) { log.innerHTML = '<li class="msg err">Choose one or more files first.</li>'; return; }
       $("#a-upload").disabled = true; log.innerHTML = "";
-      var base = tracksFor(s.id, kind).length, uploaded = 0;
+      var base = kind === "chart" ? tracksFor(s.id, kind).length : nextSort(s.id), uploaded = 0;
       for (var i = 0; i < files.length; i++) {
         var f = files[i], li = document.createElement("li");
         li.innerHTML = "<span>" + esc(f.name) + "</span><span class='meta'>uploading…</span>"; log.appendChild(li);
@@ -1880,7 +1941,7 @@
         var path = b.songId + "/" + b.kind + "/" + Date.now() + "-" + Math.random().toString(36).slice(2, 6) + "-" + safeFile(b.file.name);
         var up = await uploadFile(path, b.file, type, function (p) { setSt(i, "uploading " + Math.round(p * 100) + "%"); });
         if (up.error) { setSt(i, "failed: " + up.error.message); failed++; return; }
-        var ins = await sb.from("tracks").insert({ song_id: b.songId, kind: b.kind, label: b.kind === "guide" && !/guide|mix/i.test(label) ? "Guide mix" : label, path: path, sort: tracksFor(b.songId, b.kind).length, size_bytes: b.file.size }).select().single();
+        var ins = await sb.from("tracks").insert({ song_id: b.songId, kind: b.kind, label: b.kind === "guide" && !/guide|mix/i.test(label) ? "Guide mix" : label, path: path, sort: b.kind === "chart" ? tracksFor(b.songId, b.kind).length : nextSort(b.songId), size_bytes: b.file.size }).select().single();
         if (ins.error) { setSt(i, "failed: " + ins.error.message); failed++; return; }
         S.tracks.push(ins.data); peaksFromFile(ins.data, b.file); setSt(i, "done"); done++;
       }
@@ -1931,6 +1992,7 @@
         if (!S.loggedVisit) { S.loggedVisit = true; logEvent(S.justSignedIn ? "sign_in" : "visit"); }
         S.justSignedIn = false;
         startPresence();
+        try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist(); } catch (e) {}
       }
     } catch (e) {
       app.innerHTML = '<div class="login card"><h2>Couldn’t load the library</h2><p>' + esc(e.message || e) + '</p><button class="btn" onclick="location.reload()">Try again</button></div>';
