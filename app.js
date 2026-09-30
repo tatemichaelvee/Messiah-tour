@@ -234,6 +234,12 @@
     app.innerHTML = h;
     bindHeader();
     drawList();
+    // Pressing the play button on a thumbnail opens the song and starts the mixer.
+    $("#list").addEventListener("click", function (e) {
+      var th = e.target.closest && e.target.closest(".thumb");
+      var a = th && th.closest("a.row");
+      if (a) S.autoplay = decodeURIComponent((a.getAttribute("href") || "").replace(/^#\/song\//, ""));
+    });
     $("#q").oninput = function (e) { S.q = e.target.value; drawList(); };
     app.querySelectorAll("[data-artist]").forEach(function (b) { b.onclick = function () { S.artist = b.dataset.artist; renderList(); }; });
     var en = $("#edit-notice"); if (en) en.onclick = function () { S.editing = true; renderList(); };
@@ -260,7 +266,7 @@
         var st = status(s), meta = [s.key ? esc(s.key) : "", s.bpm ? s.bpm + " bpm" : ""].filter(Boolean).join(" · ");
         out += '<li><a class="row" href="#/song/' + encodeURIComponent(s.id) + '" aria-label="Open ' + esc(s.title) + '">' +
           '<span class="thumb">' + (CFG.posterUrl ? '<img src="' + esc(CFG.posterUrl + (posterV ? "?v=" + posterV : "")) + '" alt="" loading="lazy" onerror="this.remove()">' : '') +
-          '<span class="thumb-play">' + ICON_THUMB + '</span></span>' +
+          '<span class="thumb-play" title="Play ' + esc(s.title) + '">' + ICON_THUMB + '</span></span>' +
           '<span class="title-block"><span class="name">' + esc(s.title) + '</span><span class="by"><span class="num">' + String(all.indexOf(s) + 1).padStart(2, "0") + '</span> ' + esc(a.name) + (meta ? ' · ' + meta : '') + '</span></span>' +
           '<span class="pill ' + st.cls + '">' + st.text + '</span></a></li>';
       });
@@ -327,8 +333,10 @@
       if (mixer) mixer.destroy();
       mixer = new Mixer(mixTracks, stems.length > 0);
       mixer.onFirstPlay = function () { logEvent("play", s.id); };
+      mixer.autoplay = S.autoplay === s.id;
       mixer.start();
     }
+    S.autoplay = null;
     if (S.loggedSong !== s.id) { S.loggedSong = s.id; logEvent("song", s.id); }
     if (isAdmin()) app.querySelectorAll("[data-dl]").forEach(function (b) { b.onclick = function () { openFile(b.dataset.dl, true); }; });
     app.querySelectorAll("[data-chart]").forEach(function (b) { b.onclick = function () { openFile(b.dataset.chart, false); }; });
@@ -384,7 +392,11 @@
   Mixer.prototype.updateLoad = function () {
     var n = this.tracks.filter(function (t) { return t.ready; }).length;
     var p = document.getElementById("play");
-    if (n === this.tracks.length) { this.setLoad(""); if (p) p.disabled = false; }
+    if (n === this.tracks.length) {
+      this.setLoad(""); if (p) p.disabled = false;
+      if (this.autoplay && !this.playing) { this.autoplay = false; this.play(true); }
+    }
+    else if (this.autoplay) this.setLoad("Loading audio… " + n + " of " + this.tracks.length + " tracks ready · starts playing when loaded");
     else this.setLoad("Loading audio… " + n + " of " + this.tracks.length + " tracks ready");
   };
   Mixer.prototype.ensureGraph = function () {
@@ -416,17 +428,27 @@
   };
   Mixer.prototype.now = function () { var m = this.tracks[this.master()]; return m && m.el ? m.el.currentTime : 0; };
   Mixer.prototype.loopOn = function () { return this.loopA != null && this.loopB != null && this.loopB > this.loopA; };
-  Mixer.prototype.play = async function () {
-    if (!this.playLogged) { this.playLogged = true; if (this.onFirstPlay) this.onFirstPlay(); }
+  Mixer.prototype.play = async function (auto) {
+    var pb = document.getElementById("play"); if (pb) pb.classList.remove("nudge");
     this.ensureGraph();
     if (this.ctx && this.ctx.state === "suspended") { try { await this.ctx.resume(); } catch (e) {} }
+    if (auto && this.ctx && this.ctx.state !== "running") return this.blocked();
     var t0 = this.now();
     if (this.duration && t0 >= this.duration - 0.2) t0 = this.loopOn() ? this.loopA : 0;
     var self = this;
     this.tracks.forEach(function (t) { if (!t.broken) { t.el.playbackRate = self.rate; t.el.currentTime = t0; } });
     this.playing = true; this.setIcon();
-    await Promise.all(this.tracks.map(function (t) { return t.broken ? null : t.el.play().catch(function () {}); }));
+    var res = await Promise.all(this.tracks.map(function (t) { return t.broken ? true : t.el.play().then(function () { return true; }, function (e) { return !(e && e.name === "NotAllowedError"); }); }));
+    if (res.indexOf(false) > -1) return this.blocked();
+    if (!this.playLogged) { this.playLogged = true; if (this.onFirstPlay) this.onFirstPlay(); }
     this.loop();
+  };
+  // The browser refused to start sound without a direct tap (mostly Safari). Ask for one tap.
+  Mixer.prototype.blocked = function () {
+    this.tracks.forEach(function (t) { if (t.el) t.el.pause(); });
+    this.playing = false; this.setIcon();
+    this.setLoad("Tap play to start. Your browser needs one tap before it will play sound.");
+    var p = document.getElementById("play"); if (p) { p.classList.add("nudge"); p.focus(); }
   };
   Mixer.prototype.pause = function () {
     this.playing = false; this.setIcon();
