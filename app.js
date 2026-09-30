@@ -379,6 +379,11 @@
       el.addEventListener("canplay", function () { if (!t.ready) { t.ready = true; self.updateLoad(); } });
       el.addEventListener("error", function () { self.setLoad("One track failed to load (" + t.meta.label + "). The rest will still play."); t.ready = true; t.broken = true; self.updateLoad(); });
       el.addEventListener("ended", function () { if (i === self.master() && !self.loopOn()) self.pause(); });
+      // one stem ran out of downloaded audio: hold everything until it catches up
+      el.addEventListener("waiting", function () {
+        if (!self.playing || t.broken || el.ended || Date.now() - (t.lastSeek || 0) < 1500) return;
+        setTimeout(function () { if (self.playing && !self.stalled && el.readyState < 3 && !el.paused) self.stall(); }, 250);
+      });
       t.el = el; el.load();
     });
     this.bind(); this.applyGains();
@@ -436,7 +441,8 @@
     var t0 = this.now();
     if (this.duration && t0 >= this.duration - 0.2) t0 = this.loopOn() ? this.loopA : 0;
     var self = this;
-    this.tracks.forEach(function (t) { if (!t.broken) { t.el.playbackRate = self.rate; t.el.currentTime = t0; } });
+    this.stalled = false; clearInterval(this.stallTimer);
+    this.tracks.forEach(function (t) { if (!t.broken) { t.el.playbackRate = self.rate; t.el.currentTime = t0; t.lastSeek = Date.now(); } });
     this.playing = true; this.setIcon();
     var res = await Promise.all(this.tracks.map(function (t) { return t.broken ? true : t.el.play().then(function () { return true; }, function (e) { return !(e && e.name === "NotAllowedError"); }); }));
     if (res.indexOf(false) > -1) return this.blocked();
@@ -451,13 +457,13 @@
     var p = document.getElementById("play"); if (p) { p.classList.add("nudge"); p.focus(); }
   };
   Mixer.prototype.pause = function () {
-    this.playing = false; this.setIcon();
+    this.playing = false; this.stalled = false; clearInterval(this.stallTimer); this.setIcon();
     this.tracks.forEach(function (t) { if (t.el) t.el.pause(); });
     cancelAnimationFrame(this.raf); this.tick(true);
   };
   Mixer.prototype.seek = function (time) {
     time = Math.max(0, Math.min(time, this.duration || 0));
-    this.tracks.forEach(function (t) { if (t.el && !t.broken) t.el.currentTime = time; });
+    this.tracks.forEach(function (t) { if (t.el && !t.broken) { t.el.currentTime = time; t.lastSeek = Date.now(); } });
     this.tick(true);
   };
   Mixer.prototype.setIcon = function () { var p = document.getElementById("play"); if (p) { p.innerHTML = this.playing ? ICON_PAUSE : ICON_PLAY; p.setAttribute("aria-label", this.playing ? "Pause" : "Play"); } };
@@ -468,19 +474,46 @@
       if (!self.playing || self.dead) return;
       var now = self.now();
       if (self.loopOn() && now >= self.loopB) { self.seek(self.loopA); }
-      else if (ts - self.lastSync > 700) { self.lastSync = ts; self.sync(now); }
+      else if (!self.stalled && ts - self.lastSync > 250) { self.lastSync = ts; self.sync(now); }
       self.tick(false);
       self.raf = requestAnimationFrame(step);
     });
   };
+  // Keep stems locked to the master without audible jumps: small drift is pulled in by
+  // playing that stem 1.5% faster or slower for a moment; only a big gap (e.g. after the
+  // tab was in the background) gets a real seek, and never more than once every 3 s.
   Mixer.prototype.sync = function (now) {
-    var mi = this.master();
+    var mi = this.master(), rate = this.rate, clock = Date.now();
     this.tracks.forEach(function (t, i) {
       if (i === mi || t.broken || !t.el || t.el.ended) return;
       if (now > (t.el.duration || 0)) return;
-      if (Math.abs(t.el.currentTime - now) > 0.06) t.el.currentTime = now;
+      var diff = t.el.currentTime - now, ad = Math.abs(diff);
+      if (ad > 0.35 && t.el.readyState >= 3 && clock - (t.lastSeek || 0) > 3000) { t.el.currentTime = now; t.lastSeek = clock; t.el.playbackRate = rate; }
+      else if (ad > 0.025) t.el.playbackRate = rate * (diff > 0 ? 0.985 : 1.015);
+      else if (t.el.playbackRate !== rate) t.el.playbackRate = rate;
       if (t.el.paused) t.el.play().catch(function () {});
     });
+  };
+  Mixer.prototype.stall = function () {
+    if (this.stalled) return;
+    var self = this;
+    this.stalled = true;
+    this.tracks.forEach(function (t) { if (t.el && !t.broken) t.el.pause(); });
+    this.setLoad("Buffering…");
+    clearInterval(this.stallTimer);
+    this.stallTimer = setInterval(function () {
+      if (!self.playing || self.dead) { clearInterval(self.stallTimer); self.stalled = false; return; }
+      var ready = self.tracks.every(function (t) { return t.broken || t.el.ended || t.el.readyState >= 3; });
+      if (!ready) return;
+      clearInterval(self.stallTimer);
+      var t0 = self.now();
+      self.tracks.forEach(function (t) {
+        if (t.broken || t.el.ended) return;
+        if (Math.abs(t.el.currentTime - t0) > 0.05) { t.el.currentTime = t0; t.lastSeek = Date.now(); }
+        t.el.playbackRate = self.rate; t.el.play().catch(function () {});
+      });
+      self.stalled = false; self.setLoad("");
+    }, 200);
   };
   Mixer.prototype.tick = function (force) {
     var c = document.getElementById("clock"), sc = document.getElementById("scrub");
@@ -511,7 +544,7 @@
     document.querySelectorAll("[data-vol]").forEach(function (r) { r.oninput = function () { self.tracks[+r.dataset.vol].vol = parseFloat(r.value); self.applyGains(); }; });
   };
   Mixer.prototype.destroy = function () {
-    this.dead = true; this.playing = false; cancelAnimationFrame(this.raf);
+    this.dead = true; this.playing = false; clearInterval(this.stallTimer); cancelAnimationFrame(this.raf);
     this.tracks.forEach(function (t) { if (t.el) { t.el.pause(); t.el.removeAttribute("src"); t.el.load(); } });
     if (this.ctx) { try { this.ctx.close(); } catch (e) {} }
   };

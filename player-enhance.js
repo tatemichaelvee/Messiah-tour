@@ -92,9 +92,13 @@
       var now=m.currentTime;
       floatingBank.forEach(function(el){
         if(el===m||el.ended||el.paused)return;
-        if(Math.abs((el.currentTime||0)-now)>.08){try{el.currentTime=now;}catch(e){}}
+        // gentle sync: nudge speed for small drift, seek only for big gaps (max once per 3 s)
+        var diff=(el.currentTime||0)-now,ad=Math.abs(diff),rate=m.playbackRate||1,clock=Date.now();
+        if(ad>.35&&el.readyState>=3&&clock-(el._mtSeek||0)>3000){try{el.currentTime=now;el._mtSeek=clock;el.playbackRate=rate;}catch(e){}}
+        else if(ad>.025){el.playbackRate=rate*(diff>0?.985:1.015);}
+        else if(el.playbackRate!==rate){el.playbackRate=rate;}
       });
-    },700);
+    },250);
   }
 
   function snapshotCurrent(){
