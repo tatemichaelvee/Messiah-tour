@@ -88,6 +88,26 @@
       up.start();
     });
   }
+  // Signed audio links are reused for up to 6 h (saved in this browser), so a song you've
+  // opened before comes from the browser cache instead of downloading every stem again.
+  var URL_TTL = 6 * 3600, urlCache = {};
+  try { urlCache = JSON.parse(localStorage.getItem("mt-signed-v1") || "{}") || {}; } catch (e) { urlCache = {}; }
+  async function signedUrls(paths) {
+    var now = Date.now(), need = paths.filter(function (p) { var c = urlCache[p]; return !c || c.e < now + 45 * 60 * 1000; });
+    if (need.length) {
+      var r = await sb.storage.from(BUCKET).createSignedUrls(need, URL_TTL);
+      if (r.error) return { error: r.error };
+      (r.data || []).forEach(function (d) { if (d.signedUrl) urlCache[d.path] = { u: d.signedUrl, e: now + URL_TTL * 1000 }; });
+      Object.keys(urlCache).forEach(function (k) { if (urlCache[k].e < now) delete urlCache[k]; });
+      try { localStorage.setItem("mt-signed-v1", JSON.stringify(urlCache)); } catch (e) {}
+    }
+    var out = {}; paths.forEach(function (p) { if (urlCache[p]) out[p] = urlCache[p].u; });
+    return { data: out };
+  }
+  function warmSong(id) {
+    var paths = S.tracks.filter(function (t) { return t.song_id === id && (t.kind === "stem" || t.kind === "guide"); }).map(function (t) { return t.path; });
+    if (paths.length) signedUrls(paths);
+  }
   var ICON_PLAY = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4.5v15l13-7.5z" fill="currentColor"/></svg>';
   var ICON_PAUSE = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 4h4.5v16H6zM13.5 4H18v16h-4.5z" fill="currentColor"/></svg>';
   var posterV = "";
@@ -235,6 +255,9 @@
     bindHeader();
     drawList();
     // Pressing the play button on a thumbnail opens the song and starts the mixer.
+    var warm = function (e) { var a = e.target.closest && e.target.closest("a.row"); if (a && !a.dataset.warm) { a.dataset.warm = "1"; warmSong(decodeURIComponent((a.getAttribute("href") || "").replace(/^#\/song\//, ""))); } };
+    $("#list").addEventListener("pointerover", warm);
+    $("#list").addEventListener("touchstart", warm, { passive: true });
     $("#list").addEventListener("click", function (e) {
       var th = e.target.closest && e.target.closest(".thumb");
       var a = th && th.closest("a.row");
@@ -367,17 +390,20 @@
   }
   Mixer.prototype.start = async function () {
     var self = this;
-    var r = await sb.storage.from(BUCKET).createSignedUrls(this.tracks.map(function (t) { return t.meta.path; }), 6 * 3600);
+    var r = await signedUrls(this.tracks.map(function (t) { return t.meta.path; }));
     if (this.dead) return;
     if (r.error) { this.setLoad("Couldn't load the audio: " + r.error.message); return; }
-    var urls = {}; r.data.forEach(function (d) { urls[d.path] = d.signedUrl; });
+    var urls = r.data;
     this.tracks.forEach(function (t, i) {
       var el = new Audio();
       el.crossOrigin = "anonymous"; el.preload = "auto"; el.src = urls[t.meta.path];
       if ("preservesPitch" in el) el.preservesPitch = true;
       el.addEventListener("loadedmetadata", function () { self.duration = Math.max(self.duration, el.duration || 0); self.tick(true); });
       el.addEventListener("canplay", function () { if (!t.ready) { t.ready = true; self.updateLoad(); } });
-      el.addEventListener("error", function () { self.setLoad("One track failed to load (" + t.meta.label + "). The rest will still play."); t.ready = true; t.broken = true; self.updateLoad(); });
+      el.addEventListener("error", function () {
+        if (!t.retried && urlCache[t.meta.path]) { t.retried = true; delete urlCache[t.meta.path]; signedUrls([t.meta.path]).then(function (r2) { if (!self.dead && r2.data && r2.data[t.meta.path]) { el.src = r2.data[t.meta.path]; el.load(); } }); return; }
+        self.setLoad("One track failed to load (" + t.meta.label + "). The rest will still play."); t.ready = true; t.broken = true; self.updateLoad();
+      });
       el.addEventListener("ended", function () { if (i === self.master() && !self.loopOn()) self.pause(); });
       // one stem ran out of downloaded audio: hold everything until it catches up
       el.addEventListener("waiting", function () {
