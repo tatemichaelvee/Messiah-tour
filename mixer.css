@@ -52,3 +52,21 @@
 .order-note .linkbtn{font-size:13px;min-height:0;padding:0 2px}
 .files-order td:first-child,.files-order th:first-child{width:30px;padding-right:0}
 .files-order tr.drag-lift{display:table-row}
+
+/* compact transport: play · repeat · time · speed */
+.tp-main{flex-wrap:nowrap}
+.tp-main .clock{margin-right:auto;min-width:0;white-space:nowrap}
+.icon-btn{width:40px;height:40px;flex:none;border-radius:50%;border:0;background:transparent;color:rgba(255,255,255,.75);display:inline-grid;place-items:center;cursor:pointer;position:relative;transition:color .15s ease,background-color .15s ease}
+.icon-btn:hover{color:#fff;background:rgba(255,255,255,.12)}
+.icon-btn[aria-pressed="true"]{color:#FFD36B}
+.icon-btn[aria-pressed="true"]::after{content:"";position:absolute;bottom:3px;left:50%;width:4px;height:4px;margin-left:-2px;border-radius:50%;background:#FFD36B}
+.speed{display:inline-flex;align-items:center;flex:none;border:1px solid rgba(255,255,255,.45);border-radius:999px;overflow:hidden}
+.speed button{border:0;background:transparent;color:#fff;font:700 15px var(--mono);min-width:34px;height:36px;padding:0 8px;cursor:pointer}
+.speed button:hover:not(:disabled){background:rgba(255,255,255,.14)}
+.speed button:disabled{opacity:.35;cursor:default}
+#speed-val{min-width:58px;font-size:13px;border-left:1px solid rgba(255,255,255,.25);border-right:1px solid rgba(255,255,255,.25)}
+#speed-val.off{background:#FFD36B;color:#3A2600}
+.mt-float-tools button svg{width:18px;height:18px;vertical-align:middle}
+.p-acts{margin-left:auto;display:inline-flex;gap:12px}
+.p-acts .linkbtn{font-size:13px;color:var(--muted)}
+@media (max-width:420px){.tp-main{gap:6px}.tp-main .clock{font-size:12px}.speed button{min-width:30px;padding:0 6px}#speed-val{min-width:50px}}

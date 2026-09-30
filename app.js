@@ -113,6 +113,8 @@
   }
   var ICON_PLAY = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4.5v15l13-7.5z" fill="currentColor"/></svg>';
   var ICON_EXPAND = '<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+  var ICON_REPEAT = '<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M17 2l4 4-4 4M3 11V9a3 3 0 0 1 3-3h15M7 22l-4-4 4-4M21 13v2a3 3 0 0 1-3 3H3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+  var SPEEDS = [0.5, 0.6, 0.7, 0.75, 0.8, 0.85, 0.9, 0.95, 1, 1.05, 1.1, 1.15, 1.2, 1.25, 1.3, 1.4, 1.5];
   var ICON_PAUSE = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 4h4.5v16H6zM13.5 4H18v16h-4.5z" fill="currentColor"/></svg>';
   var posterV = "";
   function poster(cls) {
@@ -385,14 +387,11 @@
     } else {
       h += '<div class="desk">' +
         '<div class="transport">' +
-        '<div class="tp-row"><button class="play" id="play" aria-label="Play" disabled>' + ICON_PLAY + '</button>' +
+        '<div class="tp-row tp-main"><button class="play" id="play" aria-label="Play" disabled>' + ICON_PLAY + '</button>' +
+        '<button type="button" class="icon-btn" id="loop-rep" aria-pressed="false" aria-label="Repeat" title="Repeat">' + ICON_REPEAT + '</button>' +
         '<span class="clock" id="clock">0:00 / 0:00</span>' +
-        '<input class="scrub" id="scrub" type="range" min="0" max="1000" value="0" step="1" aria-label="Position"></div>' +
-        '<div class="wave-row"><canvas class="wave" id="wave" role="slider" tabindex="0" aria-valuemin="0" aria-label="Song waveform. Tap to jump, drag across a section to repeat it."></canvas><span class="wave-note" id="wave-note"></span></div>' +
-        '<div class="tp-row"><span class="tp-label">Speed</span><span class="seg" id="speed">' +
-        [0.75, 0.9, 1].map(function (v) { return '<button data-rate="' + v + '" aria-pressed="' + (v === 1) + '">' + (v === 1 ? "1×" : v + "×") + '</button>'; }).join("") + '</span>' +
-        '<span class="tp-label">Loop</span><span class="seg"><button id="loop-rep" aria-pressed="false" title="Repeat the song, or the section you picked">⟲ Repeat</button><button id="loop-a">Set A</button><button id="loop-b">Set B</button><button id="loop-clear">Clear</button></span>' +
-        '<span class="loopinfo" id="loopinfo"></span></div>' +
+        '<span class="speed" id="speed" role="group" aria-label="Speed"><button type="button" data-sp="-1" aria-label="Slower">−</button><button type="button" id="speed-val" title="Back to normal speed">1×</button><button type="button" data-sp="1" aria-label="Faster">+</button></span></div>' +
+        '<div class="wave-row"><canvas class="wave" id="wave" role="slider" tabindex="0" aria-valuemin="0" aria-label="Song position. Tap or drag to move."></canvas><span class="wave-note" id="wave-note"></span></div>' +
         '<div class="tp-row part-row"><button type="button" class="part-btn" id="part-on" aria-pressed="false">★ My part louder</button>' +
         '<label class="lvl"><span>My part</span><input type="range" id="part-lvl" min="0" max="1.5" step="0.01" value="1"></label>' +
         '<label class="lvl"><span>Rest of the band</span><input type="range" id="band-lvl" min="0" max="1" step="0.01" value="0.35"></label>' +
@@ -762,7 +761,7 @@
   function logFormHtml() {
     var f = LOGF, t = localDay(), y = dayShift(t, -1);
     var pick = function (attr, val, on, label, cls) { return '<button type="button" class="lf-chip' + (cls ? ' ' + cls : '') + '" data-lf="' + attr + '" data-v="' + esc(val) + '" aria-pressed="' + on + '">' + esc(label || val) + '</button>'; };
-    var h = '<div class="p-top"><h3>Log practice</h3><button type="button" class="linkbtn" data-lf="close">Cancel</button></div>' +
+    var h = '<div class="p-top"><h3>' + (f.editIds ? 'Edit this entry' : 'Log practice') + '</h3><button type="button" class="linkbtn" data-lf="close">Cancel</button></div>' +
       '<div class="lf-row"><span class="lf-lab">When</span><div class="lf-chips">' + pick("day", t, f.day === t, "Today") + pick("day", y, f.day === y, "Yesterday") +
       '<input type="date" class="lf-date" data-lfin="day" value="' + f.day + '" max="' + t + '" min="2026-08-01" aria-label="Pick another day"></div></div>' +
       '<div class="lf-row"><span class="lf-lab">Part</span><div class="lf-chips">' + LOG_PARTS.map(function (p) { return pick("part", p, f.part === p); }).join("") + '</div></div>' +
@@ -774,7 +773,7 @@
       '<div class="lf-row"><span class="lf-lab">How did it go</span><div class="lf-chips">' + pick("out", "learnt", f.outcome === "learnt", "Learnt it ✓", "p-ready") + pick("out", "worked", f.outcome === "worked", "Still working on it", "p-learn") + '</div></div>' +
       '<div class="lf-row two"><label><span class="lf-lab">Minutes <em>optional, total</em></span><input type="number" inputmode="numeric" min="1" max="600" data-lfin="minutes" value="' + esc(f.minutes) + '" placeholder="e.g. 45"></label>' +
       '<label><span class="lf-lab">Note <em>optional</em></span><input type="text" maxlength="300" data-lfin="note" value="' + esc(f.note) + '" placeholder="e.g. the guitar line in the chorus"></label></div>' +
-      '<div class="lf-foot"><button type="button" class="btn" data-lf="save">Save to my diary</button><span class="muted lf-msg" role="status">' + esc(f.msg) + '</span></div>';
+      '<div class="lf-foot"><button type="button" class="btn" data-lf="save">' + (f.editIds ? 'Save changes' : 'Save to my diary') + '</button><span class="muted lf-msg" role="status">' + esc(f.msg) + '</span></div>';
     return h;
   }
   function drawLogForm() { var el = document.getElementById("p-logform"); if (el) el.innerHTML = logFormHtml(); }
@@ -790,6 +789,11 @@
     f.msg = "Saving…"; drawLogForm();
     var r = await sb.from("practice_log").insert(rows).select();
     if (r.error) { f.msg = "Couldn’t save: " + r.error.message; drawLogForm(); return; }
+    // editing: the new rows are saved, so the old version of the entry can go
+    if (f.editIds) {
+      var dr = await sb.from("practice_log").delete().in("id", f.editIds);
+      if (!dr.error) S.log = S.log.filter(function (l) { return f.editIds.indexOf(l.id) === -1; });
+    }
     S.log = (r.data || []).concat(S.log).sort(function (a, b) { return a.day < b.day ? 1 : a.day > b.day ? -1 : (a.created_at < b.created_at ? 1 : -1); });
     // move progress forward, never back
     var whole = f.outcome === "learnt" && f.sections.indexOf("Whole song") !== -1, moved = [];
@@ -799,7 +803,7 @@
       if (whole && next === "learning") next = "almost";
       if (next !== cur) { moved.push(songTitle(id) + " → " + PR[next].label); await setPractice(id, next); }
     }
-    PFLASH = "Logged " + f.songs.length + " song" + (f.songs.length === 1 ? "" : "s") + " for " + dayPhrase(f.day) + "." +
+    PFLASH = f.editIds ? "Diary entry updated." + (moved.length ? " Progress updated: " + moved.join(", ") + "." : "") : "Logged " + f.songs.length + " song" + (f.songs.length === 1 ? "" : "s") + " for " + dayPhrase(f.day) + "." +
       (moved.length ? " Progress updated: " + moved.join(", ") + "." : "") + (whole ? " When you can play it through with the track, mark it Show-ready." : "");
     LOGF = null;
     if (/^#\/practice\/log/.test(location.hash)) history.replaceState(null, "", "#/practice");
@@ -812,6 +816,14 @@
     if (a === "open") { newLogForm(); var el = document.getElementById("p-logform"); el.hidden = false; drawLogForm(); el.scrollIntoView({ behavior: "smooth", block: "start" }); return; }
     if (a === "close") { LOGF = null; var c = document.getElementById("p-logform"); if (c) { c.hidden = true; c.innerHTML = ""; } if (/^#\/practice\/log/.test(location.hash)) history.replaceState(null, "", "#/practice"); return; }
     if (a === "save") { saveLog(); return; }
+    if (a === "edit") {
+      var eids = v.split(","), rows = S.log.filter(function (l) { return eids.indexOf(l.id) !== -1; });
+      if (!rows.length) return;
+      var mins = rows.reduce(function (s2, l) { return s2 + (l.minutes || 0); }, 0);
+      LOGF = { day: rows[0].day, part: rows[0].part, songs: rows.map(function (l) { return l.song_id; }), sections: rows[0].sections.slice(), outcome: rows[0].outcome, minutes: mins ? String(mins) : "", note: rows[0].note || "", msg: "", editIds: eids };
+      var ef = document.getElementById("p-logform"); ef.hidden = false; drawLogForm(); ef.scrollIntoView({ behavior: "smooth", block: "start" });
+      return;
+    }
     if (a === "del") {
       if (!confirm("Delete this diary entry? Your progress marks stay as they are.")) return;
       var ids = v.split(",");
@@ -845,7 +857,7 @@
       if (x.day !== lastDay) { if (lastDay) h += '</ul>'; h += '<h4 class="p-dayhead">' + esc(dayLabel(x.day)) + '</h4><ul class="p-diary">'; lastDay = x.day; }
       h += '<li><div class="p-entry"><span class="pmark ' + (x.outcome === "learnt" ? 'p-ready' : 'p-learn') + '">' + esc(x.part) + '</span>' +
         (showWho ? '<b>' + esc(nameOf(x.email)) + '</b> ' : '') + esc(whatText(x.sections, x.outcome)) + (x.minutes ? ' <span class="muted">· ' + x.minutes + ' min</span>' : '') +
-        (!showWho ? '<button type="button" class="linkbtn p-del" data-lf="del" data-v="' + esc(x.ids.join(",")) + '" aria-label="Delete this entry">Delete</button>' : '') + '</div>' +
+        (!showWho ? '<span class="p-acts"><button type="button" class="linkbtn" data-lf="edit" data-v="' + esc(x.ids.join(",")) + '" aria-label="Edit this entry">Edit</button><button type="button" class="linkbtn" data-lf="del" data-v="' + esc(x.ids.join(",")) + '" aria-label="Delete this entry">Delete</button></span>' : '') + '</div>' +
         '<div class="p-entry-songs">' + x.songs.map(function (id) { return '<a href="#/song/' + encodeURIComponent(id) + '">' + esc(songTitle(id)) + '</a>'; }).join("") + '</div>' +
         (x.note ? '<div class="muted p-entry-note">' + esc(x.note) + '</div>' : '') + '</li>';
     });
@@ -1110,7 +1122,7 @@
     this.attached = true;
     this.bind();
     this.tracks.forEach(function (t, i) { var r = document.querySelector('[data-vol="' + i + '"]'); if (r) r.value = t.vol; });
-    document.querySelectorAll("#speed [data-rate]").forEach(function (x) { x.setAttribute("aria-pressed", String(parseFloat(x.dataset.rate) === self.rate)); });
+    this.speedUI();
     var p = this.$("play"); if (p) p.disabled = !this.allReady();
     this.setLoad(this.loadMsg); this.applyGains(); this.setIcon(); this.partUI(); this.repeatUI(); this.waveNote(); this.tick(true);
     transportVisible = true;
@@ -1209,8 +1221,22 @@
   Mixer.prototype.repeatUI = function () {
     var b = this.$("loop-rep"); if (b) b.setAttribute("aria-pressed", String(this.repeat));
     var fr = document.getElementById("mt-float-rep");
-    if (fr && this === floatTarget()) { fr.setAttribute("aria-pressed", String(this.repeat)); fr.title = this.repeat ? (this.loopOn() ? "Repeating your section" : "Repeating the song") : "Repeat"; }
+    if (b) b.title = this.repeat ? "Repeat is on" : "Repeat";
+    if (fr && this === floatTarget()) { fr.setAttribute("aria-pressed", String(this.repeat)); fr.title = this.repeat ? "Repeat is on" : "Repeat"; }
     this.tick(true);
+  };
+  Mixer.prototype.setRate = function (r) {
+    this.rate = r;
+    this.tracks.forEach(function (t) { if (t.el) t.el.playbackRate = r; });
+    this.speedUI(); posState(this);
+  };
+  Mixer.prototype.speedUI = function () {
+    var v = this.$("speed-val"); if (!v) return;
+    v.textContent = (Math.round(this.rate * 100) / 100) + "×";
+    v.classList.toggle("off", this.rate !== 1);
+    v.setAttribute("aria-label", "Speed " + v.textContent + (this.rate !== 1 ? ", tap for normal speed" : ""));
+    var box = this.$("speed");
+    if (box) { box.querySelector('[data-sp="-1"]').disabled = this.rate <= SPEEDS[0]; box.querySelector('[data-sp="1"]').disabled = this.rate >= SPEEDS[SPEEDS.length - 1]; }
   };
   Mixer.prototype.setRegion = function (a, b) {
     this.loopA = a; this.loopB = b; this.repeat = true;
@@ -1263,7 +1289,7 @@
     this.tracks.forEach(function (t) { if (peaksCache[t.meta.id]) have++; if (peaksBuilding[t.meta.id]) busy++; });
     el.textContent = busy ? "Drawing the waveform… " + have + " of " + n + " tracks done" :
       !have ? (isAdmin() ? "No waveform yet. Draw them all from Bulk upload (on a computer)." : "The waveform for this song is on its way.") :
-      (have < n ? "Waveform covers " + have + " of " + n + " tracks. " : "") + "Tap to jump. Drag across a section to repeat it.";
+      (have < n ? "Waveform covers " + have + " of " + n + " tracks." : "");
   };
   Mixer.prototype.now = function () { var m = this.tracks[this.master()]; return m && m.el ? m.el.currentTime : 0; };
   Mixer.prototype.loopOn = function () { return this.repeat && this.loopA != null && this.loopB != null && this.loopB > this.loopA; };
@@ -1405,30 +1431,21 @@
   };
   Mixer.prototype.tick = function (force) {
     var now = this.now();
-    var c = this.$("clock"), sc = this.$("scrub");
+    var c = this.$("clock");
     if (c && !this.seeking) c.textContent = fmt(now) + " / " + fmt(this.duration);
-    if (sc && !this.seeking && this.duration) sc.value = Math.round(now / this.duration * 1000);
-    var li = this.$("loopinfo");
-    if (li) li.textContent = this.loopA != null ? ((this.loopOn() ? "Repeating " : "") + fmt(this.loopA) + (this.loopB != null ? " → " + fmt(this.loopB) : " → set B")) : (this.repeat ? "Repeating the whole song" : "");
     if (this === floatTarget()) floatTime(this);
     this.drawWaves();
   };
   Mixer.prototype.bind = function () {
     var self = this;
     document.getElementById("play").onclick = function () { self.toggle(); };
-    var sc = document.getElementById("scrub");
-    sc.addEventListener("input", function () { self.seeking = true; var c = self.$("clock"); if (c) c.textContent = fmt(sc.value / 1000 * self.duration) + " / " + fmt(self.duration); });
-    sc.addEventListener("change", function () { self.seeking = false; self.seek(sc.value / 1000 * self.duration); });
-    document.querySelectorAll("#speed [data-rate]").forEach(function (b) {
+    document.querySelectorAll("#speed [data-sp]").forEach(function (b) {
       b.onclick = function () {
-        self.rate = parseFloat(b.dataset.rate);
-        document.querySelectorAll("#speed [data-rate]").forEach(function (x) { x.setAttribute("aria-pressed", String(x === b)); });
-        self.tracks.forEach(function (t) { if (t.el) t.el.playbackRate = self.rate; });
+        var i = SPEEDS.indexOf(self.rate); if (i < 0) i = SPEEDS.indexOf(1);
+        self.setRate(SPEEDS[Math.max(0, Math.min(SPEEDS.length - 1, i + +b.dataset.sp))]);
       };
     });
-    document.getElementById("loop-a").onclick = function () { self.loopA = self.now(); if (self.loopB != null && self.loopB <= self.loopA) self.loopB = null; self.tick(true); };
-    document.getElementById("loop-b").onclick = function () { var n = self.now(); if (self.loopA == null || n <= self.loopA) return; self.setRegion(self.loopA, n); };
-    document.getElementById("loop-clear").onclick = function () { self.loopA = self.loopB = null; self.repeat = false; self.repeatUI(); };
+    document.getElementById("speed-val").onclick = function () { self.setRate(1); };
     document.getElementById("loop-rep").onclick = function () { self.repeat = !self.repeat; self.repeatUI(); };
     document.getElementById("part-on").onclick = function () { self.toggleFocus(); };
     document.getElementById("part-lvl").oninput = function () { self.partLevel = parseFloat(this.value); self.applyGains(); self.savePart(); };
@@ -1471,9 +1488,9 @@
     p.id = "mt-float-player"; p.hidden = true; p.setAttribute("aria-label", "Now playing");
     p.innerHTML = '<div class="mt-float-main"><button class="mt-float-play" aria-label="Play">' + ICON_PLAY + '</button>' +
       '<div class="mt-float-info"><strong id="mt-float-title">Practice mixer</strong><span id="mt-float-clock">0:00 / 0:00</span></div>' +
-      '<div class="mt-float-wave"><canvas id="mt-fwave" role="slider" tabindex="0" aria-valuemin="0" aria-label="Song waveform. Tap to jump, drag across a section to repeat it."></canvas></div>' +
+      '<div class="mt-float-wave"><canvas id="mt-fwave" role="slider" tabindex="0" aria-valuemin="0" aria-label="Song position. Tap or drag to move."></canvas></div>' +
       '<a id="mt-float-back" href="#/">Open mixer</a>' +
-      '<span class="mt-float-tools"><button id="mt-float-part" type="button" aria-pressed="false" aria-label="My part louder">★</button><button id="mt-float-rep" type="button" aria-pressed="false" aria-label="Repeat">⟲</button></span>' +
+      '<span class="mt-float-tools"><button id="mt-float-part" type="button" aria-pressed="false" aria-label="My part louder">★</button><button id="mt-float-rep" type="button" aria-pressed="false" aria-label="Repeat">' + ICON_REPEAT + '</button></span>' +
       '<button id="mt-float-close" aria-label="Stop and close player">×</button></div>';
     document.body.appendChild(p);
     p.querySelector(".mt-float-play").onclick = function () {
@@ -1517,34 +1534,22 @@
     m.partUI(); p.querySelector("#mt-float-rep").setAttribute("aria-pressed", String(m.repeat));
     m.drawWaves();
   }
-  // Waveform as a scrubber: tap to jump, drag across to pick a section to repeat,
-  // arrow keys move 5 s (15 s with Shift).
+  // Waveform as the position bar: tap or drag to move, arrow keys move 5 s (15 s with Shift).
   function bindWave(cv, getM) {
     if (!cv) return;
-    var down = null;
+    var down = false, last = 0;
     function at(e) { var r = cv.getBoundingClientRect(), m = getM(); return m && m.duration ? Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)) * m.duration : 0; }
     cv.addEventListener("pointerdown", function (e) {
       var m = getM(); if (!m || !m.duration) return;
-      down = { x: e.clientX, t: at(e), sel: false, a: m.loopA, b: m.loopB };
-      try { cv.setPointerCapture(e.pointerId); } catch (x) {}
+      down = true; try { cv.setPointerCapture(e.pointerId); } catch (x) {}
+      m.seek(at(e)); last = Date.now();
     });
     cv.addEventListener("pointermove", function (e) {
       var m = getM(); if (!down || !m) return;
-      if (!down.sel && Math.abs(e.clientX - down.x) > 8) down.sel = true;
-      if (down.sel) { var b = at(e); m.loopA = Math.min(down.t, b); m.loopB = Math.max(down.t, b); m.drawWaves(); }
+      if (Date.now() - last > 120) { m.seek(at(e)); last = Date.now(); }
     });
-    cv.addEventListener("pointerup", function (e) {
-      var m = getM(), d = down; down = null; if (!d || !m) return;
-      if (d.sel && m.loopB - m.loopA >= 1) m.setRegion(m.loopA, m.loopB);
-      else {
-        if (d.sel) { m.loopA = d.a; m.loopB = d.b; }
-        var t = at(e);
-        // tapping outside the section you're repeating lets go of it
-        if (m.loopOn() && (t < m.loopA || t > m.loopB)) { m.loopA = m.loopB = null; m.repeat = false; m.repeatUI(); }
-        m.seek(t);
-      }
-    });
-    cv.addEventListener("pointercancel", function () { var m = getM(); if (down && m && down.sel) { m.loopA = down.a; m.loopB = down.b; m.drawWaves(); } down = null; });
+    cv.addEventListener("pointerup", function (e) { var m = getM(); if (down && m) m.seek(at(e)); down = false; });
+    cv.addEventListener("pointercancel", function () { down = false; });
     cv.addEventListener("keydown", function (e) {
       var m = getM(); if (!m) return;
       var step = e.shiftKey ? 15 : 5;
