@@ -165,9 +165,17 @@
   }
   window.addEventListener("hashchange", function () { S.editing = false; if (!/^#\/song\//.test(location.hash)) S.loggedSong = null; render(); window.scrollTo(0, 0); });
 
+  // Leaving a song page: a mixer that has been played keeps going in the floating
+  // player; one that was only loaded is dropped.
+  function leavePage() {
+    if (!mixer) return;
+    var m = mixer; mixer = null;
+    m.detach();
+    if (m !== active) m.destroy(); else floatUpdate();
+  }
   async function render() {
     closeViewer();
-    if (mixer && route().view !== "song") { mixer.destroy(); mixer = null; }
+    if (route().view !== "song") leavePage();
     if (!S.session) return renderLogin();
     if (!S.member) return renderNotListed();
     var r = route();
@@ -356,13 +364,21 @@
     app.innerHTML = h;
     bindHeader();
 
+    // Reuse the live mixer if this song is already loaded or playing, so the page and the
+    // floating player stay on the same audio. Otherwise start a fresh one.
+    var sig = mixTracks.map(function (t) { return t.id; }).join(",");
+    if (mixer && (mixer.songId !== id || mixer.sig !== sig)) leavePage();
+    if (active && active.songId === id && active.sig !== sig) active.destroy();
     if (mixTracks.length) {
-      if (mixer) mixer.destroy();
-      mixer = new Mixer(mixTracks, stems.length > 0);
-      mixer.onFirstPlay = function () { logEvent("play", s.id); };
-      mixer.autoplay = S.autoplay === s.id;
-      mixer.start();
-    }
+      if (!mixer) mixer = active && active.songId === id ? active : null;
+      if (!mixer) {
+        mixer = new Mixer(mixTracks, stems.length > 0, s);
+        mixer.onFirstPlay = function () { logEvent("play", s.id); };
+        mixer.start();
+      }
+      mixer.attach();
+      if (S.autoplay === s.id && !mixer.playing) { if (mixer.allReady()) mixer.play(true); else mixer.autoplay = true; }
+    } else floatUpdate();
     S.autoplay = null;
     if (S.loggedSong !== s.id) { S.loggedSong = s.id; logEvent("song", s.id); }
     if (isAdmin()) app.querySelectorAll("[data-dl]").forEach(function (b) { b.onclick = function () { openFile(b.dataset.dl, true); }; });
@@ -377,9 +393,7 @@
 
   // ---------- full-screen sheet viewer ----------
   // PDFs are drawn with PDF.js so every page shows on phones too (iOS only shows
-  // page 1 of a PDF in a frame). While it's open, a player bar at the bottom keeps
-  // the song's mixer in reach; if another song is playing in the floating player,
-  // that player stays on top instead.
+  // page 1 of a PDF in a frame). The floating player stays on top while it's open.
   var PDFJS = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/", pdfjsP = null, viewer = null;
   function loadPdfjs() {
     if (window.pdfjsLib) return Promise.resolve(window.pdfjsLib);
@@ -403,21 +417,17 @@
     v.el.remove(); document.documentElement.classList.remove("pv-open");
     document.removeEventListener("keydown", v.key); window.removeEventListener("resize", v.resize);
     if (v.opener && v.opener.isConnected) v.opener.focus();
+    floatUpdate();
   }
   async function openViewer(t, songTitle) {
     closeViewer();
-    var fl = document.getElementById("mt-float-player"), floatOn = !!(fl && !fl.hidden);
-    var hasMix = !!(mixer && document.getElementById("play")) && !floatOn;
     var el = document.createElement("div");
-    el.className = "pv" + (floatOn ? " pv-float" : "");
+    el.className = "pv";
     el.setAttribute("role", "dialog"); el.setAttribute("aria-modal", "true"); el.setAttribute("aria-label", t.label);
     el.innerHTML = '<div class="pv-bar"><strong class="pv-title">' + esc(t.label) + '</strong>' +
       '<span class="pv-zoom"><button data-z="-1" aria-label="Zoom out">−</button><button data-z="0" aria-label="Fit to width">Fit</button><button data-z="1" aria-label="Zoom in">+</button></span>' +
       '<button class="pv-close" aria-label="Close sheet">×</button></div>' +
-      '<div class="pv-body" tabindex="0"><div class="pv-pages"><p class="pv-msg">Opening the sheet…</p></div></div>' +
-      (hasMix ? '<div class="pv-player"><button class="pv-play" id="pv-play" aria-label="Play">' + ICON_PLAY + '</button>' +
-        '<div class="pv-info"><strong>' + esc(songTitle || "") + '</strong><span id="pv-clock">0:00 / 0:00</span></div>' +
-        '<input id="pv-scrub" type="range" min="0" max="1000" value="0" step="1" aria-label="Position"></div>' : '');
+      '<div class="pv-body" tabindex="0"><div class="pv-pages"><p class="pv-msg">Opening the sheet…</p></div></div>';
     var v = viewer = { el: el, zoom: 1, dead: false, opener: document.activeElement, t: t };
     document.body.appendChild(el);
     document.documentElement.classList.add("pv-open");
@@ -431,13 +441,7 @@
       b.onclick = function () { var z = +b.dataset.z; v.zoom = z === 0 ? 1 : Math.max(0.5, Math.min(3, v.zoom * (z > 0 ? 1.25 : 0.8))); drawSheet(v); };
     });
     el.querySelector(".pv-close").focus();
-    if (hasMix) {
-      el.querySelector("#pv-play").onclick = function () { var p = document.getElementById("play"); if (!p) return; if (p.disabled) { var c = document.getElementById("pv-clock"); if (c) c.textContent = "Still loading the audio…"; return; } p.click(); };
-      var sc = el.querySelector("#pv-scrub");
-      sc.addEventListener("input", function () { mixer.seeking = true; var c = document.getElementById("pv-clock"); if (c) c.textContent = fmt(sc.value / 1000 * mixer.duration) + " / " + fmt(mixer.duration); });
-      sc.addEventListener("change", function () { mixer.seeking = false; mixer.seek(sc.value / 1000 * mixer.duration); });
-      mixer.setIcon(); mixer.tick(true);
-    }
+    floatDismissed = false; floatUpdate(); // the floating player sits on top of the sheet
     try {
       var r = await signedUrls([t.path]);
       if (r.error || !r.data[t.path]) throw new Error((r.error && r.error.message) || "No link for this file.");
@@ -495,13 +499,25 @@
   // One <audio> element per track, all routed through Web Audio gain nodes so
   // mute, solo and volume work on phones too. Elements stream, so long stems
   // don't have to fit in memory. A drift check keeps them locked together.
-  function Mixer(tracks, hasStems) {
+  //
+  // There is only ever one live mixer per song. The song page's transport and the
+  // floating player are two views of the same mixer, so they always show the same
+  // song, position and play state. `mixer` is the one on the current song page;
+  // `active` is the one holding playback (it keeps playing when you leave its page).
+  var active = null;
+  function Mixer(tracks, hasStems, song) {
     this.tracks = tracks.map(function (t) {
       return { meta: t, el: null, gain: null, vol: 1, mute: t.kind === "guide" && hasStems, solo: false, ready: false };
     });
+    this.songId = song.id; this.title = song.title;
+    this.sig = tracks.map(function (t) { return t.id; }).join(",");
     this.ctx = null; this.playing = false; this.rate = 1; this.loopA = null; this.loopB = null;
     this.duration = 0; this.raf = 0; this.lastSync = 0; this.dead = false; this.seeking = false;
+    this.attached = false; this.loadMsg = "Loading audio…";
   }
+  // page elements, only while this mixer is the one shown on the song page
+  Mixer.prototype.$ = function (id) { return this.attached ? document.getElementById(id) : null; };
+  Mixer.prototype.allReady = function () { return this.tracks.length > 0 && this.tracks.every(function (t) { return t.ready; }); };
   Mixer.prototype.start = async function () {
     var self = this;
     var r = await signedUrls(this.tracks.map(function (t) { return t.meta.path; }));
@@ -515,6 +531,7 @@
       el.addEventListener("loadedmetadata", function () { self.duration = Math.max(self.duration, el.duration || 0); self.tick(true); });
       el.addEventListener("canplay", function () { if (!t.ready) { t.ready = true; self.updateLoad(); } });
       el.addEventListener("error", function () {
+        if (self.dead) return;
         if (!t.retried && urlCache[t.meta.path]) { t.retried = true; delete urlCache[t.meta.path]; signedUrls([t.meta.path]).then(function (r2) { if (!self.dead && r2.data && r2.data[t.meta.path]) { el.src = r2.data[t.meta.path]; el.load(); } }); return; }
         self.setLoad("One track failed to load (" + t.meta.label + "). The rest will still play."); t.ready = true; t.broken = true; self.updateLoad();
       });
@@ -526,26 +543,47 @@
       });
       t.el = el; el.load();
     });
-    // tell the floating player exactly which audio belongs to this song
-    this.bank = this.tracks.map(function (t) { return t.el; });
-    window.mtCurrentBank = this.bank;
-    this.bind(); this.applyGains();
+    this.applyGains();
+  };
+  // Connect this mixer to the song page that was just drawn (first open, or coming
+  // back to a song that is still playing in the floating player).
+  Mixer.prototype.attach = function () {
+    var self = this;
+    this.attached = true;
+    this.bind();
+    this.tracks.forEach(function (t, i) { var r = document.querySelector('[data-vol="' + i + '"]'); if (r) r.value = t.vol; });
+    document.querySelectorAll("#speed [data-rate]").forEach(function (x) { x.setAttribute("aria-pressed", String(parseFloat(x.dataset.rate) === self.rate)); });
+    var p = this.$("play"); if (p) p.disabled = !this.allReady();
+    this.setLoad(this.loadMsg); this.applyGains(); this.setIcon(); this.tick(true);
+    transportVisible = true;
+    if (this.io) this.io.disconnect();
+    var tr = document.querySelector(".transport");
+    if (tr && "IntersectionObserver" in window) {
+      this.io = new IntersectionObserver(function (es) { if (!self.attached) return; transportVisible = es[es.length - 1].isIntersecting; floatUpdate(); });
+      this.io.observe(tr);
+    }
+    floatUpdate();
+  };
+  Mixer.prototype.detach = function () {
+    this.attached = false; this.seeking = false;
+    if (this.io) { this.io.disconnect(); this.io = null; }
   };
   Mixer.prototype.master = function () {
     var best = 0, d = -1;
     this.tracks.forEach(function (t, i) { if (!t.broken && t.el && (t.el.duration || 0) > d) { d = t.el.duration || 0; best = i; } });
     return best;
   };
-  Mixer.prototype.setLoad = function (msg) { var lb = document.getElementById("loadbar"); if (lb) { lb.textContent = msg; lb.hidden = !msg; } };
+  Mixer.prototype.setLoad = function (msg) { this.loadMsg = msg; var lb = this.$("loadbar"); if (lb) { lb.textContent = msg; lb.hidden = !msg; } };
   Mixer.prototype.updateLoad = function () {
     var n = this.tracks.filter(function (t) { return t.ready; }).length;
-    var p = document.getElementById("play");
+    var p = this.$("play");
     if (n === this.tracks.length) {
       this.setLoad(""); if (p) p.disabled = false;
       if (this.autoplay && !this.playing) { this.autoplay = false; this.play(true); }
     }
     else if (this.autoplay) this.setLoad("Loading audio… " + n + " of " + this.tracks.length + " tracks ready · starts playing when loaded");
     else this.setLoad("Loading audio… " + n + " of " + this.tracks.length + " tracks ready");
+    floatUpdate();
   };
   Mixer.prototype.ensureGraph = function () {
     if (this.ctx) return;
@@ -560,13 +598,13 @@
   };
   Mixer.prototype.applyGains = function () {
     var anySolo = this.tracks.some(function (t) { return t.solo; });
-    var ctx = this.ctx;
+    var ctx = this.ctx, attached = this.attached;
     this.tracks.forEach(function (t, i) {
       var audible = anySolo ? t.solo : !t.mute;
       var g = audible ? t.vol : 0;
       if (t.gain && ctx) t.gain.gain.setTargetAtTime(g, ctx.currentTime, 0.015);
       else if (t.el) { t.el.muted = !audible; t.el.volume = t.vol; }
-      var row = document.querySelector('.trk[data-i="' + i + '"]');
+      var row = attached && document.querySelector('.trk[data-i="' + i + '"]');
       if (row) {
         row.classList.toggle("silent", !audible);
         row.querySelector("[data-mute]").setAttribute("aria-pressed", String(t.mute));
@@ -577,10 +615,11 @@
   Mixer.prototype.now = function () { var m = this.tracks[this.master()]; return m && m.el ? m.el.currentTime : 0; };
   Mixer.prototype.loopOn = function () { return this.loopA != null && this.loopB != null && this.loopB > this.loopA; };
   Mixer.prototype.play = async function (auto) {
-    var pb = document.getElementById("play"); if (pb) pb.classList.remove("nudge");
-    // Only one song plays at a time: starting this one stops whatever the floating player holds.
-    var fl = document.getElementById("mt-float-player");
-    if (fl && !fl.hidden) { var fx = fl.querySelector("#mt-float-close"); if (fx) fx.click(); }
+    if (this.dead) return;
+    var pb = this.$("play"); if (pb) pb.classList.remove("nudge");
+    // Only one song plays at a time: starting this one stops the one that was playing.
+    if (active && active !== this) { var old = active; active = null; old.destroy(); }
+    active = this; floatDismissed = false;
     this.ensureGraph();
     if (this.ctx && this.ctx.state === "suspended") { try { await this.ctx.resume(); } catch (e) {} }
     if (auto && this.ctx && this.ctx.state !== "running") return this.blocked();
@@ -591,16 +630,19 @@
     this.tracks.forEach(function (t) { if (!t.broken) { t.el.playbackRate = self.rate; t.el.currentTime = t0; t.lastSeek = Date.now(); } });
     this.playing = true; this.setIcon();
     var res = await Promise.all(this.tracks.map(function (t) { return t.broken ? true : t.el.play().then(function () { return true; }, function (e) { return !(e && e.name === "NotAllowedError"); }); }));
+    if (this.dead) return;
     if (res.indexOf(false) > -1) return this.blocked();
     if (!this.playLogged) { this.playLogged = true; if (this.onFirstPlay) this.onFirstPlay(); }
+    mediaSession(this);
     this.loop();
   };
+  Mixer.prototype.toggle = function () { if (this.playing) this.pause(); else this.play(); };
   // The browser refused to start sound without a direct tap (mostly Safari). Ask for one tap.
   Mixer.prototype.blocked = function () {
     this.tracks.forEach(function (t) { if (t.el) t.el.pause(); });
     this.playing = false; this.setIcon();
     this.setLoad("Tap play to start. Your browser needs one tap before it will play sound.");
-    var p = document.getElementById("play"); if (p) { p.classList.add("nudge"); p.focus(); }
+    var p = this.$("play"); if (p) { p.classList.add("nudge"); p.focus(); }
   };
   Mixer.prototype.pause = function () {
     this.playing = false; this.stalled = false; clearInterval(this.stallTimer); this.setIcon();
@@ -613,8 +655,9 @@
     this.tick(true);
   };
   Mixer.prototype.setIcon = function () {
-    var self = this;
-    ["play", "pv-play"].forEach(function (id) { var p = document.getElementById(id); if (p) { p.innerHTML = self.playing ? ICON_PAUSE : ICON_PLAY; p.setAttribute("aria-label", self.playing ? "Pause" : "Play"); } });
+    var p = this.$("play");
+    if (p) { p.innerHTML = this.playing ? ICON_PAUSE : ICON_PLAY; p.setAttribute("aria-label", this.playing ? "Pause" : "Play"); }
+    floatUpdate();
   };
   Mixer.prototype.loop = function () {
     var self = this;
@@ -665,20 +708,19 @@
     }, 200);
   };
   Mixer.prototype.tick = function (force) {
-    var now = this.now(), self = this;
-    [["clock", "scrub"], ["pv-clock", "pv-scrub"]].forEach(function (ids) {
-      var c = document.getElementById(ids[0]), sc = document.getElementById(ids[1]);
-      if (c) c.textContent = fmt(now) + " / " + fmt(self.duration);
-      if (sc && !self.seeking && self.duration) sc.value = Math.round(now / self.duration * 1000);
-    });
-    var li = document.getElementById("loopinfo");
-    if (li && (force || true)) li.textContent = this.loopA != null ? ("A " + fmt(this.loopA) + (this.loopB != null ? " → B " + fmt(this.loopB) : "")) : "";
+    var now = this.now();
+    var c = this.$("clock"), sc = this.$("scrub");
+    if (c && !this.seeking) c.textContent = fmt(now) + " / " + fmt(this.duration);
+    if (sc && !this.seeking && this.duration) sc.value = Math.round(now / this.duration * 1000);
+    var li = this.$("loopinfo");
+    if (li) li.textContent = this.loopA != null ? ("A " + fmt(this.loopA) + (this.loopB != null ? " → B " + fmt(this.loopB) : "")) : "";
+    if (this === floatTarget()) floatTime(this);
   };
   Mixer.prototype.bind = function () {
     var self = this;
-    document.getElementById("play").onclick = function () { self.playing ? self.pause() : self.play(); };
+    document.getElementById("play").onclick = function () { self.toggle(); };
     var sc = document.getElementById("scrub");
-    sc.addEventListener("input", function () { self.seeking = true; var c = document.getElementById("clock"); if (c) c.textContent = fmt(sc.value / 1000 * self.duration) + " / " + fmt(self.duration); });
+    sc.addEventListener("input", function () { self.seeking = true; var c = self.$("clock"); if (c) c.textContent = fmt(sc.value / 1000 * self.duration) + " / " + fmt(self.duration); });
     sc.addEventListener("change", function () { self.seeking = false; self.seek(sc.value / 1000 * self.duration); });
     document.querySelectorAll("#speed [data-rate]").forEach(function (b) {
       b.onclick = function () {
@@ -696,10 +738,81 @@
   };
   Mixer.prototype.destroy = function () {
     this.dead = true; this.playing = false; clearInterval(this.stallTimer); cancelAnimationFrame(this.raf);
-    if (this.bank && window.mtCurrentBank === this.bank) window.mtCurrentBank = null;
+    this.detach();
+    if (active === this) active = null;
     this.tracks.forEach(function (t) { if (t.el) { t.el.pause(); t.el.removeAttribute("src"); t.el.load(); } });
-    if (this.ctx) { try { this.ctx.close(); } catch (e) {} }
+    if (this.ctx) { try { this.ctx.close().catch(function () {}); } catch (e) {} }
+    floatUpdate();
   };
+
+  // ---------- floating player ----------
+  // Shows the mixer that is playing (or the page's mixer while you're scrolled past its
+  // controls or reading a sheet). Every button acts on that same mixer.
+  var transportVisible = true, floatDismissed = false;
+  function floatTarget() {
+    if (active && !active.dead) return active;
+    return mixer && !mixer.dead ? mixer : null;
+  }
+  function floatEl() {
+    var p = document.getElementById("mt-float-player");
+    if (p) return p;
+    p = document.createElement("section");
+    p.id = "mt-float-player"; p.hidden = true; p.setAttribute("aria-label", "Now playing");
+    p.innerHTML = '<div class="mt-float-main"><button class="mt-float-play" aria-label="Play">' + ICON_PLAY + '</button>' +
+      '<div class="mt-float-info"><strong id="mt-float-title">Practice mixer</strong><span id="mt-float-clock">0:00 / 0:00</span></div>' +
+      '<input id="mt-float-scrub" type="range" min="0" max="1000" value="0" step="1" aria-label="Position">' +
+      '<a id="mt-float-back" href="#/">Open mixer</a><button id="mt-float-close" aria-label="Stop and close player">×</button></div>';
+    document.body.appendChild(p);
+    p.querySelector(".mt-float-play").onclick = function () {
+      var m = floatTarget(); if (!m) return;
+      if (!m.playing && !m.allReady()) { p.querySelector("#mt-float-clock").textContent = "Still loading the audio…"; return; }
+      m.toggle();
+    };
+    p.querySelector("#mt-float-close").onclick = function () {
+      var m = floatTarget(); if (!m) return;
+      m.pause();
+      if (m.attached) { floatDismissed = true; floatUpdate(); } else m.destroy();
+    };
+    var sc = p.querySelector("#mt-float-scrub");
+    sc.addEventListener("input", function () { var m = floatTarget(); if (!m) return; m.seeking = true; p.querySelector("#mt-float-clock").textContent = fmt(sc.value / 1000 * m.duration) + " / " + fmt(m.duration); });
+    sc.addEventListener("change", function () { var m = floatTarget(); if (!m) return; m.seeking = false; m.seek(sc.value / 1000 * m.duration); });
+    return p;
+  }
+  function floatTime(m) {
+    var p = document.getElementById("mt-float-player"); if (!p || p.hidden) return;
+    var now = m.now();
+    if (!m.seeking) {
+      p.querySelector("#mt-float-clock").textContent = fmt(now) + " / " + fmt(m.duration);
+      if (m.duration) p.querySelector("#mt-float-scrub").value = Math.round(now / m.duration * 1000);
+    }
+  }
+  function floatUpdate() {
+    var m = floatTarget();
+    var show = !!m && !floatDismissed && (!m.attached || !transportVisible || !!viewer);
+    if (!show && !document.getElementById("mt-float-player")) { document.documentElement.classList.remove("float-on"); return; }
+    var p = floatEl();
+    p.hidden = !show;
+    document.documentElement.classList.toggle("float-on", show);
+    if (!show) return;
+    p.querySelector("#mt-float-title").textContent = m.title;
+    var back = p.querySelector("#mt-float-back");
+    back.href = "#/song/" + encodeURIComponent(m.songId); back.hidden = m.attached;
+    var b = p.querySelector(".mt-float-play");
+    b.innerHTML = m.playing ? ICON_PAUSE : ICON_PLAY; b.setAttribute("aria-label", m.playing ? "Pause" : "Play");
+    floatTime(m);
+  }
+  function mediaSession(m) {
+    if (!("mediaSession" in navigator)) return;
+    try {
+      navigator.mediaSession.metadata = new MediaMetadata({ title: m.title, artist: "Messiah Tour Canada", album: "Band Portal" });
+      var go = function (f) { return function (d) { var t = floatTarget(); if (t) f(t, d || {}); }; };
+      navigator.mediaSession.setActionHandler("play", go(function (t) { t.play(); }));
+      navigator.mediaSession.setActionHandler("pause", go(function (t) { t.pause(); }));
+      navigator.mediaSession.setActionHandler("seekbackward", go(function (t, d) { t.seek(t.now() - (d.seekOffset || 10)); }));
+      navigator.mediaSession.setActionHandler("seekforward", go(function (t, d) { t.seek(t.now() + (d.seekOffset || 10)); }));
+      navigator.mediaSession.setActionHandler("seekto", go(function (t, d) { if (d.seekTime != null) t.seek(d.seekTime); }));
+    } catch (e) {}
+  }
 
   // ---------- admin: song editing & uploads ----------
   function adminSongPanel(s, files) {
