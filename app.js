@@ -361,10 +361,10 @@
     var s = S.songs.find(function (x) { return x.id === id; });
     if (!s) { app.innerHTML = header() + '<main class="sheet"><p>That song isn’t in the library. <a href="#/">Back to all songs</a></p></main>'; bindHeader(); return; }
     var stems = tracksFor(id, "stem"), guides = tracksFor(id, "guide"), charts = tracksFor(id, "chart");
-    var mixTracks = audioTracks(id);
-    // a mixer that's already loaded for this song keeps its own order, so rows line up with it
+    var mixTracks = myOrder(id);
+    // a mixer that's already loaded for this song is put in the same order, so rows line up with it
     var live = [mixer, active].filter(function (m) { return m && !m.dead && m.songId === id && m.sig === trackSig(mixTracks); })[0];
-    if (live) mixTracks = live.tracks.map(function (t) { return t.meta; });
+    if (live) reorderLive(live, mixTracks);
     var facts = [];
     if (s.key) facts.push("<span>Key <b>" + esc(s.key) + "</b></span>");
     if (s.bpm) facts.push("<span>BPM <b>" + esc(s.bpm) + "</b></span>");
@@ -379,11 +379,11 @@
       '<div class="songgrid"><div class="col-main">';
 
     // mixer
-    h += '<div class="block"><div class="mix-head"><h3>Practice mixer</h3>' + (isAdmin() && mixTracks.length > 1 ? '<button class="linkbtn" id="reorder-btn" aria-pressed="' + !!S.reorder + '">' + (S.reorder ? 'Done reordering' : 'Reorder stems') + '</button>' : '') + '</div>';
+    h += '<div class="block"><h3>Practice mixer</h3>';
     if (!mixTracks.length) {
       h += '<p class="empty">No audio uploaded for this song yet.</p>';
     } else {
-      h += '<div class="desk' + (S.reorder && isAdmin() ? ' reordering' : '') + '">' +
+      h += '<div class="desk">' +
         '<div class="transport">' +
         '<div class="tp-row"><button class="play" id="play" aria-label="Play" disabled>' + ICON_PLAY + '</button>' +
         '<span class="clock" id="clock">0:00 / 0:00</span>' +
@@ -400,13 +400,13 @@
         '<div class="loadbar" id="loadbar">Loading audio…</div>' +
         '</div><div class="tracks" id="tracks">' +
         mixTracks.map(function (t, i) {
-          return '<div class="trk" data-i="' + i + '">' +
-            (S.reorder && isAdmin() ? '<span class="mv"><button type="button" data-mv="' + i + '" data-dir="-1" aria-label="Move ' + esc(t.label) + ' up"' + (i === 0 ? ' disabled' : '') + '>↑</button><button type="button" data-mv="' + i + '" data-dir="1" aria-label="Move ' + esc(t.label) + ' down"' + (i === mixTracks.length - 1 ? ' disabled' : '') + '>↓</button></span>' : '') +
-            '<span class="tname"><span class="tkind">' + (t.kind === "guide" ? "Guide mix" : "Stem") + '</span>' + esc(t.label) + '</span>' +
+          return '<div class="trk" data-i="' + i + '" data-id="' + esc(t.id) + '">' +
+            '<span class="tname" data-hold><button type="button" class="grip" data-grip aria-label="Move ' + esc(t.label) + ' (hold and drag, or use the arrow keys)">⋮⋮</button><span class="tkind">' + (t.kind === "guide" ? "Guide mix" : "Stem") + '</span>' + esc(t.label) + '</span>' +
             '<span class="ms"><button class="m" data-mute="' + i + '" aria-pressed="false" aria-label="Mute ' + esc(t.label) + '">M</button><button class="s" data-solo="' + i + '" aria-pressed="false" aria-label="Solo ' + esc(t.label) + '">S</button><button class="p" data-part="' + i + '" aria-pressed="false" aria-label="My part: ' + esc(t.label) + '" title="This is my part">★</button></span>' +
             '<input type="range" min="0" max="1" step="0.01" value="1" data-vol="' + i + '" aria-label="Volume ' + esc(t.label) + '">' +
             (isAdmin() ? '<button class="linkbtn dl" data-dl="' + esc(t.id) + '">Download</button>' : '<span class="dl" aria-hidden="true"></span>') + '</div>';
-        }).join("") + '</div></div>';
+        }).join("") + '</div></div>' +
+        (mixTracks.length > 1 ? '<p class="order-note">' + (hasMyOrder(id) ? 'You’re using your own track order. <button type="button" class="linkbtn" id="reset-order">Use the band order</button>' : 'Hold a track and drag it to put them in your own order.') + '</p>' : '');
       if (stems.length && guides.length) h += '<p class="muted" style="font-size:14px">The guide mix starts muted so it doesn’t double the stems. Unmute it to hear the full recording.</p>';
     }
     h += '</div>';
@@ -426,7 +426,7 @@
       (sheet ? '<button class="btn sheetbtn" data-sheet="' + esc(sheet.id) + '">' + ICON_EXPAND + ' Open Ruva’s coloured sheet</button>' : '') + '</div>';
     h += '</div></div>';
 
-    if (isAdmin()) h += adminSongPanel(s, mixTracks.concat(charts));
+    if (isAdmin()) h += adminSongPanel(s, audioTracks(id).concat(charts));
     h += '</main>';
     app.innerHTML = h;
     bindHeader();
@@ -456,9 +456,19 @@
       };
     });
     if (isAdmin()) bindAdminSong(s);
-    var rb = $("#reorder-btn"); if (rb) rb.onclick = function () { S.reorder = !S.reorder; renderSong(id); };
-    app.querySelectorAll("[data-mv]").forEach(function (b) { b.onclick = function () { moveTrack(id, +b.dataset.mv, +b.dataset.dir); }; });
+    // your own track order: hold and drag in the mixer
+    var tb = $("#tracks");
+    if (tb && window.MTSort) MTSort(tb, { rows: ".trk", onDrop: function (ids, moved, kb) {
+      var band = audioTracks(id).map(function (t) { return t.id; });
+      saveMyOrder(id, ids.join(",") === band.join(",") ? null : ids);
+      renderSong(id); refocusGrip(moved, kb);
+    } });
+    var ro = $("#reset-order"); if (ro) ro.onclick = function () { saveMyOrder(id, null); renderSong(id); };
+    // the band order (everyone): drag in the admin file table
+    var ft = $("#a-files-order");
+    if (ft && window.MTSort) MTSort(ft, { rows: "tr[data-id]", onDrop: function (ids, moved, kb) { saveBandOrder(id, ids); refocusGrip(moved, kb); } });
   }
+  function refocusGrip(id, kb) { if (!kb) return; var g = app.querySelector('[data-id="' + CSS.escape(id) + '"] [data-grip]'); if (g) g.focus(); }
   // Stems and guide mixes play in one admin-set order (tracks.sort), the same for everyone.
   function audioTracks(id) {
     return S.tracks.filter(function (t) { return t.song_id === id && (t.kind === "stem" || t.kind === "guide"); })
@@ -466,19 +476,34 @@
   }
   function trackSig(list) { return list.map(function (t) { return t.id; }).sort().join(","); }
   function nextSort(songId) { var a = audioTracks(songId); return a.length ? Math.max.apply(null, a.map(function (t) { return t.sort || 0; })) + 1 : 0; }
-  async function moveTrack(songId, i, dir) {
-    var m = mixer && mixer.songId === songId ? mixer : null;
-    var list = m ? m.tracks.map(function (t) { return t.meta; }) : audioTracks(songId), j = i + dir;
-    if (j < 0 || j >= list.length) return;
-    if (m) { var tmp = m.tracks[i]; m.tracks[i] = m.tracks[j]; m.tracks[j] = tmp; }
-    var x = list[i]; list[i] = list[j]; list[j] = x;
+  // Each person can keep their own order per song (saved in this browser); otherwise the band order.
+  var ORDER_KEY = "mt-order-v1";
+  function orderStore() { try { return JSON.parse(localStorage.getItem(ORDER_KEY) || "{}") || {}; } catch (e) { return {}; } }
+  function hasMyOrder(id) { var m = orderStore()[id]; return !!(m && m.length); }
+  function saveMyOrder(id, ids) {
+    var st = orderStore(); if (ids) st[id] = ids; else delete st[id];
+    try { localStorage.setItem(ORDER_KEY, JSON.stringify(st)); } catch (e) {}
+  }
+  function myOrder(id) {
+    var band = audioTracks(id), mine = orderStore()[id];
+    if (!mine || !mine.length) return band;
+    var pos = {}; mine.forEach(function (x, i) { pos[x] = i; });
+    var rank = function (t) { return t.id in pos ? pos[t.id] : 1e6 + band.indexOf(t); }; // new uploads go to the end
+    return band.slice().sort(function (a, b) { return rank(a) - rank(b); });
+  }
+  function reorderLive(m, list) {
+    var pos = {}; list.forEach(function (t, i) { pos[t.id] = i; });
+    m.tracks.sort(function (a, b) { return pos[a.meta.id] - pos[b.meta.id]; });
+  }
+  async function saveBandOrder(songId, ids) {
     var changed = [];
-    list.forEach(function (t, k) { if (t.sort !== k) { t.sort = k; changed.push(t); } });
+    ids.forEach(function (tid, k) { var t = S.tracks.find(function (x) { return x.id === tid; }); if (t && t.sort !== k) { t.sort = k; changed.push(t); } });
     renderSong(songId);
-    var again = app.querySelector('[data-mv="' + j + '"][data-dir="' + dir + '"]') || app.querySelector('[data-mv="' + j + '"]'); if (again) again.focus();
     var res = await Promise.all(changed.map(function (t) { return sb.from("tracks").update({ sort: t.sort }).eq("id", t.id); }));
     var bad = res.filter(function (r) { return r.error; })[0];
+    var msg = document.getElementById("a-order-msg");
     if (bad) alert("Couldn't save the new order: " + bad.error.message);
+    else if (msg) msg.textContent = "Saved. This is now the order everyone sees.";
   }
 
   // ---------- full-screen sheet viewer ----------
@@ -1629,9 +1654,9 @@
       '<label class="f" for="a-files">Files<input id="a-files" type="file" multiple accept="audio/*,.pdf,image/png,image/jpeg"></label></div>' +
       '<p class="muted" style="margin:0;font-size:13px">Files up to 1 GB. Big WAVs upload in resumable chunks, so keep this tab open until they finish.</p>' +
       '<div class="tp-row"><button class="btn primary" id="a-upload">Upload</button></div><ul class="uplist" id="a-uplog" style="list-style:none;padding:0;margin:0"></ul></div>' +
-      (files.length ? '<hr style="border:0;border-top:1px solid var(--line);width:100%"><div class="form"><h3 style="margin:0">Files on this song</h3><div class="tablewrap"><table class="band"><thead><tr><th>Name</th><th>Type</th><th>Size</th><th></th></tr></thead><tbody>' +
-        files.map(function (t) { return '<tr><td><input class="f-rename" data-id="' + esc(t.id) + '" value="' + esc(t.label) + '" aria-label="Track name" style="width:100%;padding:6px 8px;border:1px solid var(--line);border-radius:6px;background:var(--surface)"></td><td>' + t.kind + '</td><td class="meta">' + (t.size_bytes ? mb(t.size_bytes) : "") + '</td><td><button class="btn danger" data-del="' + esc(t.id) + '">Delete</button></td></tr>'; }).join("") +
-        '</tbody></table></div><p class="muted" style="margin:0;font-size:13px">Rename a track by editing its name; it saves when you leave the box.</p></div>' : '') +
+      (files.length ? '<hr style="border:0;border-top:1px solid var(--line);width:100%"><div class="form"><h3 style="margin:0">Files on this song</h3><div class="tablewrap"><table class="band files-order"><thead><tr><th><span class="sr">Order</span></th><th>Name</th><th>Type</th><th>Size</th><th></th></tr></thead><tbody id="a-files-order">' +
+        files.map(function (t) { var audio = t.kind !== "chart"; return '<tr' + (audio ? ' data-id="' + esc(t.id) + '"' : '') + '><td>' + (audio ? '<button type="button" class="grip" data-grip aria-label="Move ' + esc(t.label) + ' in the band order (drag, or use the arrow keys)">⋮⋮</button>' : '') + '</td><td><input class="f-rename" data-id="' + esc(t.id) + '" value="' + esc(t.label) + '" aria-label="Track name" style="width:100%;padding:6px 8px;border:1px solid var(--line);border-radius:6px;background:var(--surface)"></td><td>' + t.kind + '</td><td class="meta">' + (t.size_bytes ? mb(t.size_bytes) : "") + '</td><td><button class="btn danger" data-del="' + esc(t.id) + '">Delete</button></td></tr>'; }).join("") +
+        '</tbody></table></div><p class="muted" style="margin:0;font-size:13px">Drag ⋮⋮ to set the track order everyone sees in the mixer (people who arranged their own order keep theirs). Rename a track by editing its name; it saves when you leave the box. <span id="a-order-msg" style="color:var(--ok);font-weight:700"></span></p></div>' : '') +
       '</div></div>';
   }
   function bindAdminSong(s) {
