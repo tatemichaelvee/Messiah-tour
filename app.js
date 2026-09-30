@@ -116,8 +116,14 @@
     var out = {}; paths.forEach(function (p) { if (urlCache[p]) out[p] = urlCache[p].u; });
     return { data: out };
   }
+  // The mixer plays the light phone copies (see lite.js) when every track in the song has
+  // one, so all stems come from the same encoder and line up; otherwise the originals.
+  function playPaths(tracks) {
+    var lite = tracks.length > 0 && tracks.every(function (t) { return t.lite_path; });
+    return tracks.map(function (t) { return lite ? t.lite_path : t.path; });
+  }
   function warmSong(id) {
-    var paths = S.tracks.filter(function (t) { return t.song_id === id && (t.kind === "stem" || t.kind === "guide"); }).map(function (t) { return t.path; });
+    var paths = playPaths(S.tracks.filter(function (t) { return t.song_id === id && (t.kind === "stem" || t.kind === "guide"); }));
     if (paths.length) signedUrls(paths);
   }
   var ICON_PLAY = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4.5v15l13-7.5z" fill="currentColor"/></svg>';
@@ -1069,6 +1075,7 @@
   // song, position and play state. `mixer` is the one on the current song page;
   // `active` is the one holding playback (it keeps playing when you leave its page).
   var active = null;
+  var IOS = /iP(hone|od|ad)/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
   function Mixer(tracks, hasStems, song) {
     this.tracks = tracks.map(function (t) {
       return { meta: t, el: null, gain: null, vol: 1, mute: t.kind === "guide" && hasStems, solo: false, ready: false };
@@ -1097,19 +1104,22 @@
   Mixer.prototype.allReady = function () { return this.tracks.length > 0 && this.tracks.every(function (t) { return t.ready; }); };
   Mixer.prototype.start = async function () {
     var self = this;
-    var r = await signedUrls(this.tracks.map(function (t) { return t.meta.path; }));
+    var srcs = playPaths(this.tracks.map(function (t) { return t.meta; }));
+    this.tracks.forEach(function (t, i) { t.src = srcs[i]; });
+    this.lite = srcs.length > 0 && srcs[0] !== this.tracks[0].meta.path;
+    var r = await signedUrls(srcs);
     if (this.dead) return;
     if (r.error) { this.setLoad("Couldn't load the audio: " + r.error.message); return; }
     var urls = r.data;
     this.tracks.forEach(function (t, i) {
       var el = new Audio();
-      el.crossOrigin = "anonymous"; el.preload = "auto"; el.src = urls[t.meta.path];
+      el.crossOrigin = "anonymous"; el.preload = "auto"; el.src = urls[t.src];
       if ("preservesPitch" in el) el.preservesPitch = true;
       el.addEventListener("loadedmetadata", function () { self.duration = Math.max(self.duration, el.duration || 0); self.tick(true); });
       el.addEventListener("canplay", function () { if (!t.ready) { t.ready = true; self.updateLoad(); } });
       el.addEventListener("error", function () {
         if (self.dead) return;
-        if (!t.retried && urlCache[t.meta.path]) { t.retried = true; delete urlCache[t.meta.path]; signedUrls([t.meta.path]).then(function (r2) { if (!self.dead && r2.data && r2.data[t.meta.path]) { el.src = r2.data[t.meta.path]; el.load(); } }); return; }
+        if (!t.retried && urlCache[t.src]) { t.retried = true; delete urlCache[t.src]; signedUrls([t.src]).then(function (r2) { if (!self.dead && r2.data && r2.data[t.src]) { el.src = r2.data[t.src]; el.load(); } }); return; }
         self.setLoad("One track failed to load (" + t.meta.label + "). The rest will still play."); t.ready = true; t.broken = true; self.updateLoad();
       });
       el.addEventListener("ended", function () { if (self.tracks[self.master()] !== t || self.loopOn()) return; if (self.repeat && self.playing) self.play(); else self.pause(); });
@@ -1404,16 +1414,39 @@
   // Keep stems locked to the master without audible jumps: small drift is pulled in by
   // playing that stem 1.5% faster or slower for a moment; only a big gap (e.g. after the
   // tab was in the background) gets a real seek, and never more than once every 3 s.
+  // iPhone/iPad Safari doesn't reliably play a stem at a nudged speed through Web Audio
+  // (the sound and the reported position part ways), so there each stem is corrected with
+  // a small exact seek instead, aimed slightly ahead to cover how long Safari takes to seek;
+  // that lead is learned per stem.
   Mixer.prototype.sync = function (now) {
     var mi = this.master(), rate = this.rate, clock = Date.now();
+    if (IOS) return this.syncIOS(now, mi, rate, clock);
     this.tracks.forEach(function (t, i) {
       if (i === mi || t.broken || !t.el || t.el.ended) return;
       if (now > (t.el.duration || 0)) return;
       var diff = t.el.currentTime - now, ad = Math.abs(diff);
-      if (ad > 0.35 && t.el.readyState >= 3 && clock - (t.lastSeek || 0) > 3000) { t.el.currentTime = now; t.lastSeek = clock; t.el.playbackRate = rate; }
+      if (ad > 0.15 && t.el.readyState >= 3 && clock - (t.lastSeek || 0) > 3000) { t.el.currentTime = now; t.lastSeek = clock; t.el.playbackRate = rate; }
       else if (ad > 0.025) t.el.playbackRate = rate * (diff > 0 ? 0.985 : 1.015);
       else if (t.el.playbackRate !== rate) t.el.playbackRate = rate;
       if (t.el.paused) t.el.play().catch(function () {});
+    });
+  };
+  Mixer.prototype.syncIOS = function (now, mi, rate, clock) {
+    this.tracks.forEach(function (t, i) {
+      if (i === mi || t.broken || !t.el || t.el.ended) return;
+      if (now > (t.el.duration || 0)) return;
+      if (t.el.playbackRate !== rate) t.el.playbackRate = rate;
+      if (t.el.paused) { t.el.play().catch(function () {}); return; }
+      if (t.el.seeking || t.el.readyState < 3) return;
+      var diff = t.el.currentTime - now, ad = Math.abs(diff), since = clock - (t.lastSeek || 0);
+      if (t.fixAt && since > 500 && since < 3000) {
+        // after our last correction the stem is still off by `diff`: adjust how far ahead we aim
+        t.lead = Math.max(0, Math.min(0.4, (t.lead || 0) - diff * 0.8)); t.fixAt = 0;
+      }
+      if (ad > 0.04 && since > 1200) {
+        t.el.currentTime = Math.min((t.el.duration || now) - 0.05, now + (diff < 0 ? (t.lead || 0) * rate : 0));
+        t.lastSeek = clock; t.fixAt = clock;
+      }
     });
   };
   Mixer.prototype.stall = function () {
@@ -1702,7 +1735,7 @@
         var ins = await sb.from("tracks").insert({ song_id: s.id, kind: kind, label: prettyName(f.name), path: path, sort: base + i, size_bytes: f.size }).select().single();
         if (ins.error) { li.lastChild.textContent = "saved file but not listed: " + ins.error.message; continue; }
         S.tracks.push(ins.data); uploaded++;
-        peaksFromFile(ins.data, f);
+        peaksFromFile(ins.data, f); liteFromFile(ins.data, f);
         li.lastChild.textContent = "done";
       }
       $("#a-upload").disabled = false;
@@ -1713,7 +1746,7 @@
         if (b.dataset.confirm !== "1") { b.dataset.confirm = "1"; b.textContent = "Tap again to delete"; return; }
         b.disabled = true;
         var t = S.tracks.find(function (x) { return x.id === b.dataset.del; });
-        var rm = await sb.storage.from(BUCKET).remove([t.path]);
+        var rm = await sb.storage.from(BUCKET).remove([t.path].concat(t.lite_path ? [t.lite_path] : []));
         if (rm.error) { alert("Couldn't delete: " + rm.error.message); b.disabled = false; return; }
         await sb.from("tracks").delete().eq("id", t.id);
         S.tracks = S.tracks.filter(function (x) { return x.id !== t.id; });
@@ -1944,9 +1977,10 @@
         (big ? '<p class="msg err" style="margin:0">' + big + ' file' + (big > 1 ? "s are" : " is") + ' over 1 GB and will be skipped. Export those as MP3 or M4A and add them again.</p>' : '') +
         '<div class="tp-row"><button class="btn primary" id="b-go">Upload ' + bulk.files.filter(function (b) { return b.songId && b.status !== "done"; }).length + ' matched file(s)</button><button class="btn quiet" id="b-clear">Clear list</button><span class="muted" id="b-progress"></span></div>' : '') +
       '</div>' +
-      '<div class="card admin" style="margin-top:20px"><span class="admin-tag">Admin</span><h2>Waveforms</h2><div id="wave-admin"><p class="muted" style="margin:0">Checking…</p></div></div></main>';
+      '<div class="card admin" style="margin-top:20px"><span class="admin-tag">Admin</span><h2>Waveforms</h2><div id="wave-admin"><p class="muted" style="margin:0">Checking…</p></div></div>' +
+      '<div class="card admin" style="margin-top:20px"><span class="admin-tag">Admin</span><h2>Phone copies</h2><div id="lite-admin"></div></div></main>';
     bindHeader();
-    waveAdmin();
+    waveAdmin(); liteAdmin();
     bulk.files.forEach(function (b, i) {
       var sel = app.querySelector('[data-bulk="' + i + '"]'); if (sel) { sel.value = b.songId || ""; sel.onchange = function () { b.songId = sel.value; renderBulk(); }; }
       var ks = app.querySelector('[data-bkind="' + i + '"]'); if (ks) ks.onchange = function () { b.kind = ks.value; };
@@ -1981,7 +2015,7 @@
         if (up.error) { setSt(i, "failed: " + up.error.message); failed++; return; }
         var ins = await sb.from("tracks").insert({ song_id: b.songId, kind: b.kind, label: b.kind === "guide" && !/guide|mix/i.test(label) ? "Guide mix" : label, path: path, sort: b.kind === "chart" ? tracksFor(b.songId, b.kind).length : nextSort(b.songId), size_bytes: b.file.size }).select().single();
         if (ins.error) { setSt(i, "failed: " + ins.error.message); failed++; return; }
-        S.tracks.push(ins.data); peaksFromFile(ins.data, b.file); setSt(i, "done"); done++;
+        S.tracks.push(ins.data); peaksFromFile(ins.data, b.file); liteFromFile(ins.data, b.file); setSt(i, "done"); done++;
       }
       var cursor = 0;
       async function worker() { while (cursor < queue.length) { var i = queue[cursor++]; await one(i); if (prog) prog.textContent = (done + failed + skipped) + " of " + n + " processed…"; } }
@@ -2016,6 +2050,85 @@
         WAVEJOB.msg = (ok + fail) + " of " + n + " done" + (fail ? " · " + fail + " couldn’t be read" : "");
         var pr = document.getElementById("wave-prog"); if (pr) pr.textContent = WAVEJOB.msg;
       }).then(function (res) { WAVEJOB = null; var pr = document.getElementById("wave-prog"); if (pr) { waveAdmin(); } });
+    };
+  }
+
+  // ---------- phone copies ----------
+  // A light 128 kbps MP3 of every audio track (lite.js), so phones can stream a whole song's
+  // stems at once and keep them in sync. Made on an admin's computer: new uploads are
+  // converted from the file as it goes up; older tracks from the Phone copies card.
+  var liteQueue = [], liteBusy = 0, LITEJOB = null, LITE_PAR = 3;
+  function isAudio(t) { return t.kind === "stem" || t.kind === "guide"; }
+  function litePath(t) { return "lite/" + t.path.replace(/\.[a-z0-9]+$/i, "") + ".mp3"; }
+  async function saveLite(t, blob) {
+    var path = litePath(t);
+    var up = await sb.storage.from(BUCKET).upload(path, blob, { contentType: "audio/mpeg", upsert: true });
+    if (up.error) throw up.error;
+    var r = await sb.from("tracks").update({ lite_path: path, lite_bytes: blob.size }).eq("id", t.id);
+    if (r.error) throw r.error;
+    var st = S.tracks.find(function (x) { return x.id === t.id; });
+    if (st) { st.lite_path = path; st.lite_bytes = blob.size; }
+    t.lite_path = path; t.lite_bytes = blob.size;
+  }
+  function liteNext() {
+    while (liteBusy < LITE_PAR && liteQueue.length) {
+      var job = liteQueue.shift(); liteBusy++;
+      (async function (job) {
+        try {
+          var blob;
+          if (job.file) blob = await MTLite.fromFile(job.file, job.onProgress);
+          else {
+            var u = await signedUrls([job.t.path]);
+            if (u.error || !u.data[job.t.path]) throw new Error("No link for this file");
+            blob = await MTLite.fromUrl(u.data[job.t.path], job.t.path, job.t.size_bytes, job.onProgress);
+          }
+          await saveLite(job.t, blob);
+          job.ok();
+        } catch (e) { if (window.console) console.warn("Phone copy failed for " + job.t.label, e); job.bad(e); }
+        liteBusy--; liteNext();
+      })(job);
+    }
+  }
+  function liteConvert(t, file, onProgress) {
+    return new Promise(function (ok, bad) { liteQueue.push({ t: t, file: file, onProgress: onProgress, ok: ok, bad: bad }); liteNext(); });
+  }
+  function liteFromFile(t, file) {
+    if (!isAudio(t) || !window.MTLite || !MTLite.supported() || !finePointer()) return;
+    liteConvert(t, file).catch(function () {});
+  }
+  function liteAdmin() {
+    var box = document.getElementById("lite-admin"); if (!box) return;
+    var audio = S.tracks.filter(isAudio), missing = audio.filter(function (t) { return !t.lite_path; });
+    var songsAll = {}, songsReady = {};
+    audio.forEach(function (t) { songsAll[t.song_id] = 1; });
+    Object.keys(songsAll).forEach(function (id) { if (audio.every(function (t) { return t.song_id !== id || t.lite_path; })) songsReady[id] = 1; });
+    var gb = missing.reduce(function (a, t) { return a + (t.size_bytes || 0); }, 0);
+    var h = '<p style="margin:0"><b>' + (audio.length - missing.length) + ' of ' + audio.length + '</b> tracks have a phone copy · <b>' + Object.keys(songsReady).length + ' of ' + Object.keys(songsAll).length + '</b> songs play from them.</p>' +
+      '<p class="muted" style="margin:0;font-size:14px">The mixer streams every stem at once. Big WAV stems are too heavy for phones, so they fall behind and drift out of time (mostly on iPhone). A phone copy is a light MP3 of the same track (about 1 MB a minute); a song plays from them once all its tracks have one. The originals stay as they are for downloading.</p>';
+    if (!window.MTLite || !MTLite.supported() || !finePointer()) h += '<p class="muted" style="margin:0;font-size:14px">Open this page on a computer to make them.</p>';
+    else if (missing.length || LITEJOB) h += '<p class="muted" style="margin:0;font-size:14px">Making the other ' + missing.length + ' downloads ' + mb(gb) + ' and converts it here. Do it on a computer with good Wi-Fi and keep this tab open. If it stops, press the button again and it carries on where it left off. New uploads get a phone copy automatically.</p>' +
+      '<div class="tp-row"><button class="btn primary" id="lite-go"' + (LITEJOB ? ' disabled' : '') + '>' + (LITEJOB ? 'Making phone copies…' : 'Make the missing phone copies') + '</button><span class="muted" id="lite-prog">' + (LITEJOB ? esc(LITEJOB.msg) : '') + '</span></div>';
+    else h += '<p class="muted" style="margin:0;font-size:14px">All done. New uploads get a phone copy automatically.</p>';
+    box.innerHTML = h;
+    var go = document.getElementById("lite-go");
+    if (go) go.onclick = function () {
+      // smallest songs first, so whole songs switch over as early as possible
+      var bySong = {};
+      missing.forEach(function (t) { (bySong[t.song_id] = bySong[t.song_id] || []).push(t); });
+      var order = Object.keys(bySong).sort(function (a, b) { var s = function (id) { return bySong[id].reduce(function (x, t) { return x + (t.size_bytes || 0); }, 0); }; return s(a) - s(b); });
+      var list = []; order.forEach(function (id) { list = list.concat(bySong[id]); });
+      var n = list.length, ok = 0, fail = 0, prog = {};
+      LITEJOB = { msg: "Starting…" }; liteAdmin();
+      function show() {
+        var cur = Object.keys(prog).map(function (k) { return prog[k]; });
+        LITEJOB.msg = (ok + fail) + " of " + n + " done" + (fail ? " · " + fail + " failed" : "") + (cur.length ? " · now: " + cur.join(", ") : "");
+        var pr = document.getElementById("lite-prog"); if (pr) pr.textContent = LITEJOB.msg;
+      }
+      Promise.all(list.map(function (t) {
+        var name = t.label + " (" + ((S.songs.find(function (s) { return s.id === t.song_id; }) || {}).title || "") + ")";
+        return liteConvert(t, null, function (p) { prog[t.id] = name + " " + Math.round(p * 100) + "%"; show(); })
+          .then(function () { ok++; }, function () { fail++; }).then(function () { delete prog[t.id]; show(); });
+      })).then(function () { LITEJOB = null; liteAdmin(); });
     };
   }
 
