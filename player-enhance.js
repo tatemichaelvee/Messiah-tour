@@ -82,7 +82,7 @@
       try{nativePause.call(el);nativeRemove.call(el,'src');nativeLoad.call(el);}catch(e){}
       var c=ctxByAudio.get(el);if(c)contexts.add(c);
     });
-    contexts.forEach(function(c){try{nativeClose.call(c);}catch(e){}});
+    contexts.forEach(function(c){try{if(c.state!=='closed'){var p=nativeClose.call(c);if(p&&p.catch)p.catch(function(){});}}catch(e){}});
   }
   function ensureSync(){
     if(syncTimer)return;
@@ -166,6 +166,7 @@
   function refreshBank(){
     var rows=Array.from(document.querySelectorAll('.trk[data-i]'));
     if(!rows.length)return;
+    if(window.mtCurrentBank&&window.mtCurrentBank.length===rows.length){currentBank=window.mtCurrentBank.slice();lastRowCount=rows.length;return;}
     if(rows.length!==lastRowCount||currentBank.length!==rows.length){
       currentBank=allAudios.slice(-rows.length);
       lastRowCount=rows.length;

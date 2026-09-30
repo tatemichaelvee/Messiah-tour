@@ -526,6 +526,9 @@
       });
       t.el = el; el.load();
     });
+    // tell the floating player exactly which audio belongs to this song
+    this.bank = this.tracks.map(function (t) { return t.el; });
+    window.mtCurrentBank = this.bank;
     this.bind(); this.applyGains();
   };
   Mixer.prototype.master = function () {
@@ -575,6 +578,9 @@
   Mixer.prototype.loopOn = function () { return this.loopA != null && this.loopB != null && this.loopB > this.loopA; };
   Mixer.prototype.play = async function (auto) {
     var pb = document.getElementById("play"); if (pb) pb.classList.remove("nudge");
+    // Only one song plays at a time: starting this one stops whatever the floating player holds.
+    var fl = document.getElementById("mt-float-player");
+    if (fl && !fl.hidden) { var fx = fl.querySelector("#mt-float-close"); if (fx) fx.click(); }
     this.ensureGraph();
     if (this.ctx && this.ctx.state === "suspended") { try { await this.ctx.resume(); } catch (e) {} }
     if (auto && this.ctx && this.ctx.state !== "running") return this.blocked();
@@ -690,6 +696,7 @@
   };
   Mixer.prototype.destroy = function () {
     this.dead = true; this.playing = false; clearInterval(this.stallTimer); cancelAnimationFrame(this.raf);
+    if (this.bank && window.mtCurrentBank === this.bank) window.mtCurrentBank = null;
     this.tracks.forEach(function (t) { if (t.el) { t.el.pause(); t.el.removeAttribute("src"); t.el.load(); } });
     if (this.ctx) { try { this.ctx.close(); } catch (e) {} }
   };
