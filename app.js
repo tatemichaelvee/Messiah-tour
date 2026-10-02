@@ -1447,22 +1447,44 @@
     });
   };
   Mixer.prototype.syncIOS = function (now, mi, rate, clock) {
+    var self = this;
     this.tracks.forEach(function (t, i) {
       if (i === mi || t.broken || !t.el || t.el.ended) return;
       if (now > (t.el.duration || 0)) return;
       if (t.el.playbackRate !== rate) t.el.playbackRate = rate;
-      if (t.el.paused) { t.el.play().catch(function () {}); return; }
+
+      // iOS can restart one media element a little later than the others after a
+      // buffer/route interruption. Before restarting it, move it to the master clock.
+      if (t.el.paused) {
+        if (t.el.readyState >= 2) {
+          try { t.el.currentTime = Math.min((t.el.duration || now) - 0.03, Math.max(0, now + 0.015)); } catch (e) {}
+          t.lastSeek = clock;
+        }
+        t.el.play().catch(function () {});
+        return;
+      }
+
       if (t.el.seeking || t.el.readyState < 3) return;
       var diff = t.el.currentTime - now, ad = Math.abs(diff), since = clock - (t.lastSeek || 0);
-      if (t.fixAt && since > 500 && since < 3000) {
-        // after our last correction the stem is still off by `diff`: adjust how far ahead we aim
-        t.lead = Math.max(0, Math.min(0.4, (t.lead || 0) - diff * 0.8)); t.fixAt = 0;
-      }
-      if (ad > 0.04 && since > 1200) {
-        t.el.currentTime = Math.min((t.el.duration || now) - 0.05, now + (diff < 0 ? (t.lead || 0) * rate : 0));
-        t.lastSeek = clock; t.fixAt = clock;
+
+      // Keep phone playback phase-locked much more tightly. The lite MP3 copies are
+      // small enough that a short corrective seek is more reliable on iOS than
+      // letting several independent <audio> elements drift for over a second.
+      if (ad > 0.025 && since > 450) {
+        var target = now + 0.012;
+        try { t.el.currentTime = Math.min((t.el.duration || target) - 0.03, Math.max(0, target)); } catch (e) {}
+        t.lastSeek = clock;
       }
     });
+
+    // If the master itself was paused by iOS while the mixer still thinks it is
+    // playing, restart it and immediately re-lock the other stems on the next tick.
+    var m = this.tracks[mi];
+    if (m && m.el && !m.broken && this.playing && m.el.paused && !m.el.ended && m.el.readyState >= 2) {
+      m.el.playbackRate = rate;
+      m.el.play().catch(function () {});
+      this.lastSync = 0;
+    }
   };
   Mixer.prototype.stall = function () {
     if (this.stalled) return;
