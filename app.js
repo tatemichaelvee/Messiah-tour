@@ -1685,6 +1685,7 @@
     return '<div class="block"><div class="card admin">' +
       '<span class="admin-tag">Admin · only you see this</span>' +
       '<div class="form"><div class="two">' +
+      '<label class="f" for="a-title">Song name<input id="a-title" value="' + esc(s.title || "") + '" placeholder="Song title" required></label>' +
       '<label class="f" for="a-key">Key<input id="a-key" value="' + esc(s.key || "") + '" placeholder="e.g. Bb"></label>' +
       '<label class="f" for="a-bpm">BPM<input id="a-bpm" type="number" inputmode="numeric" value="' + esc(s.bpm || "") + '"></label>' +
       '<label class="f" for="a-set">Setlist section<select id="a-set"><option value="">Not on the setlist</option>' + S.sets.map(function (x) { return '<option value="' + x.no + '"' + (s.set_no === x.no ? " selected" : "") + '>' + esc(x.title) + '</option>'; }).join("") + '</select></label>' +
@@ -1710,7 +1711,9 @@
       var b = $("#a-save"); b.disabled = true;
       var bpm = parseInt($("#a-bpm").value, 10);
       var pos = parseInt($("#a-pos").value, 10), setNo = parseInt($("#a-set").value, 10);
-      var patch = { set_no: isFinite(setNo) ? setNo : null, set_pos: isFinite(pos) ? pos : (s.set_pos || null), credit: $("#a-credit").value.trim() || null,
+      var title = $("#a-title").value.trim();
+      if (!title) { $("#a-save-msg").textContent = "Song name can't be empty."; b.disabled = false; $("#a-title").focus(); return; }
+      var patch = { title: title, set_no: isFinite(setNo) ? setNo : null, set_pos: isFinite(pos) ? pos : (s.set_pos || null), credit: $("#a-credit").value.trim() || null,
         key: $("#a-key").value.trim() || null, bpm: isFinite(bpm) ? bpm : null, bv_notes: $("#a-bv").value.trim() || null, lyrics: $("#a-lyrics").value.replace(/\s+$/, "") || null };
       var r = await sb.from("songs").update(patch).eq("id", s.id).select().single();
       b.disabled = false;
