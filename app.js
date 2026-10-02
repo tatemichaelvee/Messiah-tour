@@ -1447,17 +1447,17 @@
     });
   };
   Mixer.prototype.syncIOS = function (now, mi, rate, clock) {
-    var self = this;
     this.tracks.forEach(function (t, i) {
       if (i === mi || t.broken || !t.el || t.el.ended) return;
       if (now > (t.el.duration || 0)) return;
       if (t.el.playbackRate !== rate) t.el.playbackRate = rate;
 
-      // iOS can restart one media element a little later than the others after a
-      // buffer/route interruption. Before restarting it, move it to the master clock.
+      // If iOS paused one stem while the mixer is still running, line it up once
+      // before restarting it. Do not keep seeking during normal playback because
+      // repeated seeks sound like a scratched CD and can cause brief cut-outs.
       if (t.el.paused) {
         if (t.el.readyState >= 2) {
-          try { t.el.currentTime = Math.min((t.el.duration || now) - 0.03, Math.max(0, now + 0.015)); } catch (e) {}
+          try { t.el.currentTime = Math.min((t.el.duration || now) - 0.03, Math.max(0, now)); } catch (e) {}
           t.lastSeek = clock;
         }
         t.el.play().catch(function () {});
@@ -1467,23 +1467,18 @@
       if (t.el.seeking || t.el.readyState < 3) return;
       var diff = t.el.currentTime - now, ad = Math.abs(diff), since = clock - (t.lastSeek || 0);
 
-      // Keep phone playback phase-locked much more tightly. The lite MP3 copies are
-      // small enough that a short corrective seek is more reliable on iOS than
-      // letting several independent <audio> elements drift for over a second.
-      if (ad > 0.025 && since > 450) {
-        var target = now + 0.012;
-        try { t.el.currentTime = Math.min((t.el.duration || target) - 0.03, Math.max(0, target)); } catch (e) {}
+      // On iOS, only correct clearly audible drift. Small timing differences are left
+      // alone so Safari can stream continuously without constant decoder flushes.
+      if (ad > 0.12 && since > 3500) {
+        try { t.el.currentTime = Math.min((t.el.duration || now) - 0.03, Math.max(0, now)); } catch (e) {}
         t.lastSeek = clock;
       }
     });
 
-    // If the master itself was paused by iOS while the mixer still thinks it is
-    // playing, restart it and immediately re-lock the other stems on the next tick.
     var m = this.tracks[mi];
     if (m && m.el && !m.broken && this.playing && m.el.paused && !m.el.ended && m.el.readyState >= 2) {
       m.el.playbackRate = rate;
       m.el.play().catch(function () {});
-      this.lastSync = 0;
     }
   };
   Mixer.prototype.stall = function () {
