@@ -134,7 +134,7 @@
   var posterV = "";
   function poster(cls) {
     if (!CFG.posterUrl) return "";
-    return '<img class="' + cls + '" src="' + esc(CFG.posterUrl + (posterV ? "?v=" + posterV : "")) + '" alt="Messiah Tour Canada poster: Michael Mahendere and Direct Worship" onerror="this.remove()">';
+    return '<img class="' + cls + '" src="' + esc(CFG.posterUrl + (posterV ? "?v=" + posterV : "")) + '" alt="Messiah Tour Canada poster: Minister Michael" onerror="this.remove()">';
   }
   // Activity log: who signs in, opens songs and presses play. Only admins can read it.
   function logEvent(event, songId) {
