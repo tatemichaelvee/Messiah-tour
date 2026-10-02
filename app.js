@@ -922,7 +922,8 @@
         var c = tally(st, songs), last = Object.keys(mine).map(function (k) { return mine[k].updated_at; }).sort().pop();
         var wk = dayShift(localDay(), -6), logs = allLog.filter(function (l) { return l.email === m.email; });
         var days7 = {}; logs.forEach(function (l) { if (l.day >= wk) days7[l.day] = 1; });
-        return { m: m, c: c, st: st, last: last, pct: c.total ? c.ready / c.total : 0, days7: Object.keys(days7).length, lastDay: logs.length ? logs[0].day : null };
+        var points = c.ready + c.almost * 0.67 + c.learning * 0.33;
+        return { m: m, c: c, st: st, last: last, pct: c.total ? points / c.total : 0, days7: Object.keys(days7).length, lastDay: logs.length ? logs[0].day : null };
       }).sort(function (a, b) { return b.pct - a.pct || b.c.almost - a.c.almost; });
       h += '<p class="muted" style="margin:6px 0 16px">Everyone’s own marks on the ' + songs.length + ' setlist songs the band plays. “Not my part” songs don’t count against anyone.</p>' +
         '<div class="card p-card"><h3>By person</h3><div class="tablewrap"><table class="band act p-team"><thead><tr><th>Name</th><th>Progress</th><th>Ready</th><th>Almost</th><th>Learning</th><th>Not started</th><th>Practice days<br><small>last 7</small></th><th>Last practised</th><th>Updated</th></tr></thead><tbody>' +
