@@ -294,7 +294,7 @@
       (full ? '<div class="hero"><div class="hero-text">' +
       '<span class="hero-tag">Vialy Studios Inc &amp; Grateful Events</span>' +
       '<h1>' + TITLE + '</h1>' +
-      '<div class="presenters">Michael Mahendere &amp; Direct Worship · with Misheck Mahendere and Eleana Makombe</div>' +
+      '<div class="presenters">Minister Michael · with Misheck Mahendere and Eleana Makombe</div>' +
       '<div class="dates"><span><b>Edmonton</b> Fri Oct 9</span><span><b>Toronto</b> Sat Oct 10</span><span><b>Vancouver</b> Sun Oct 11</span></div>' +
       '</div>' + poster("hero-poster") + '</div>' : '<a class="brand" href="#/">Messiah Tour ' + TITLE + '</a>') +
       '</header>';
