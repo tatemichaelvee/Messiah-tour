@@ -360,7 +360,7 @@
       if (!list.length) return; any = true;
       out += '<section class="artist' + (g.other ? ' other' : '') + '"><div class="artist-head"><h2>' + esc(g.title) + '</h2><span class="sub">' + (g.sub ? esc(g.sub) + ' · ' : '') + list.length + ' song' + (list.length > 1 ? "s" : "") + '</span></div><ol class="songs">';
       list.forEach(function (s) {
-        var meta = [s.key ? esc(s.key) : "", s.bpm ? s.bpm + " bpm" : ""].filter(Boolean).join(" · ");
+        var meta = s.key ? esc(s.key) : "";
         var by = g.setlist || g.other ? esc(s.artist) + (s.credit ? " · orig. " + esc(s.credit) : "") : (s.credit ? "orig. " + esc(s.credit) : esc(s.artist));
         out += '<li><a class="row" href="#/song/' + encodeURIComponent(s.id) + '" aria-label="Open ' + esc(s.title) + '">' +
           '<span class="thumb">' + (CFG.posterUrl ? '<img src="' + esc(CFG.posterUrl + (posterV ? "?v=" + posterV : "")) + '" alt="" loading="lazy" onerror="this.remove()">' : '') +
