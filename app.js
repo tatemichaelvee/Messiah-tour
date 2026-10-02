@@ -688,7 +688,10 @@
   });
   function practiceSummary() {
     var songs = practiceSongs(), c = tally(myStatus, songs), d = daysToShow();
-    return '<div class="p-hero"><div><b class="p-big">' + c.ready + '<small>/' + c.total + '</small></b><span>songs show-ready</span></div>' +
+    var points = c.ready + c.almost * 0.67 + c.learning * 0.33;
+    var pct = c.total ? Math.round(points / c.total * 100) : 0;
+    return '<div class="p-hero"><div><b class="p-big">' + pct + '<small>%</small></b><span>overall progress</span></div>' +
+      '<div><b class="p-big">' + c.ready + '<small>/' + c.total + '</small></b><span>songs show-ready</span></div>' +
       '<div><b class="p-big">' + d + '</b><span>day' + (d === 1 ? '' : 's') + ' to Edmonton</span></div></div>' + stackBar(c) +
       '<div class="plegend">' + ["ready", "almost", "learning", "none", "skip"].map(function (k) { return '<span><i class="' + PR[k].cls + '"></i>' + PR[k].label + ' ' + c[k] + '</span>'; }).join("") + '</div>';
   }
