@@ -174,6 +174,61 @@
     if (isWav(file.name)) return run({ kind: "wav-file", file: file }, null, onProgress);
     return viaDecode(function () { return file.arrayBuffer(); }, onProgress);
   };
+
+  // Build one lightweight stereo rehearsal mix from already-created phone copies.
+  // This is intentionally done on a desktop admin browser so iPhone/iPad only has to
+  // stream one MP3 instead of many independently-clocked media elements.
+  API.mixUrls = async function (items, onProgress) {
+    if (!items || !items.length) throw new Error("No tracks to mix");
+    var rate = 0, L = null, R = null, used = 0;
+
+    function grow(n) {
+      if (L && L.length >= n) return;
+      var size = Math.max(n, L ? Math.ceil(L.length * 1.25) : n);
+      var nl = new Float32Array(size), nr = new Float32Array(size);
+      if (L) { nl.set(L); nr.set(R); }
+      L = nl; R = nr;
+    }
+
+    for (var ix = 0; ix < items.length; ix++) {
+      var it = items[ix];
+      var res = await fetch(it.url);
+      if (!res.ok) throw new Error("Couldn't download " + (it.label || "track") + " (HTTP " + res.status + ")");
+      var ab = await decode(await res.arrayBuffer());
+      if (!rate) rate = ab.sampleRate;
+      var n = Math.ceil(ab.duration * rate);
+      grow(n);
+      if (n > used) used = n;
+
+      var a = ab.getChannelData(0), b = ab.numberOfChannels > 1 ? ab.getChannelData(1) : a;
+      var ratio = ab.sampleRate / rate;
+      for (var i = 0; i < n; i++) {
+        var p = i * ratio, j = Math.floor(p), f = p - j;
+        if (j >= a.length) break;
+        var j2 = Math.min(a.length - 1, j + 1);
+        L[i] += a[j] + (a[j2] - a[j]) * f;
+        R[i] += b[j] + (b[j2] - b[j]) * f;
+      }
+      if (onProgress) onProgress({ stage: "mix", done: ix + 1, total: items.length, label: it.label || "" });
+    }
+
+    // Keep the summed stems clean without changing their relative balance.
+    var peak = 0;
+    for (var k = 0; k < used; k++) {
+      var p1 = Math.abs(L[k]), p2 = Math.abs(R[k]);
+      if (p1 > peak) peak = p1;
+      if (p2 > peak) peak = p2;
+    }
+    var gain = peak > 0.92 ? 0.92 / peak : 1;
+    var outL = new Float32Array(used), outR = new Float32Array(used);
+    for (var q = 0; q < used; q++) { outL[q] = L[q] * gain; outR[q] = R[q] * gain; }
+    L = R = null;
+    if (onProgress) onProgress({ stage: "encode", done: items.length, total: items.length, label: "" });
+    return run({ kind: "pcm", rate: rate, left: outL, right: outR }, [outL.buffer, outR.buffer], function (p) {
+      if (onProgress) onProgress({ stage: "encode", progress: p });
+    });
+  };
+
   API.supported = function () { return !!(window.Worker && window.Blob && window.ReadableStream && (window.OfflineAudioContext || window.webkitOfflineAudioContext)); };
   window.MTLite = API;
 })();
