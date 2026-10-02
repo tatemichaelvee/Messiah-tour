@@ -421,6 +421,8 @@
         }).join("") + '</div></div>' +
         (mixTracks.length > 1 ? '<p class="order-note">' + (hasMyOrder(id) ? 'You’re using your own track order. <button type="button" class="linkbtn" id="reset-order">Use the band order</button>' : 'Hold a track and drag it to put them in your own order.') + '</p>' : '');
       if (stems.length && guides.length) h += '<p class="muted" style="font-size:14px">The guide mix starts muted so it doesn’t double the stems. Unmute it to hear the full recording.</p>';
+      var hiddenSplit = audioTracks(id).length - mixTracks.length;
+      if (hiddenSplit > 0) h += '<p class="muted" style="font-size:14px">Performance mode: ' + hiddenSplit + ' duplicate L/R split files are skipped because the matching stereo stems are already loaded. This reduces buffering without deleting any files.</p>';
     }
     h += '</div>';
     var myNote = S.practice[s.id] && S.practice[s.id].note;
@@ -497,8 +499,17 @@
     var st = orderStore(); if (ids) st[id] = ids; else delete st[id];
     try { localStorage.setItem(ORDER_KEY, JSON.stringify(st)); } catch (e) {}
   }
+  function playbackTracks(id) {
+    var band = audioTracks(id), full = {};
+    var base = function (label) { return String(label || "").replace(/\.(L|R)$/i, "").trim().toLowerCase(); };
+    band.forEach(function (t) { if (!/\.(L|R)$/i.test(t.label || "")) full[base(t.label)] = true; });
+    return band.filter(function (t) {
+      var side = /\.(L|R)$/i.test(t.label || "");
+      return !side || !full[base(t.label)];
+    });
+  }
   function myOrder(id) {
-    var band = audioTracks(id), mine = orderStore()[id];
+    var band = playbackTracks(id), mine = orderStore()[id];
     if (!mine || !mine.length) return band;
     var pos = {}; mine.forEach(function (x, i) { pos[x] = i; });
     var rank = function (t) { return t.id in pos ? pos[t.id] : 1e6 + band.indexOf(t); }; // new uploads go to the end
