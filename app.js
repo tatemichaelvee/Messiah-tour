@@ -123,7 +123,7 @@
     return tracks.map(function (t) { return lite ? t.lite_path : t.path; });
   }
   function warmSong(id) {
-    var paths = playPaths(S.tracks.filter(function (t) { return t.song_id === id && (t.kind === "stem" || t.kind === "guide"); }));
+    var paths = playPaths(playbackTracks(id));
     if (paths.length) signedUrls(paths);
   }
   var ICON_PLAY = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4.5v15l13-7.5z" fill="currentColor"/></svg>';
@@ -414,15 +414,19 @@
         '</div><div class="tracks" id="tracks">' +
         mixTracks.map(function (t, i) {
           return '<div class="trk" data-i="' + i + '" data-id="' + esc(t.id) + '">' +
-            '<span class="tname" data-hold><button type="button" class="grip" data-grip aria-label="Move ' + esc(t.label) + ' (hold and drag, or use the arrow keys)">⋮⋮</button><span class="tkind">' + (t.kind === "guide" ? "Guide mix" : "Stem") + '</span>' + esc(t.label) + '</span>' +
+            '<span class="tname" data-hold><button type="button" class="grip" data-grip aria-label="Move ' + esc(t.label) + ' (hold and drag, or use the arrow keys)">⋮⋮</button><span class="tkind">' + (t.kind === "guide" ? "Guide mix" : t.kind === "mobile_mix" ? "Mobile mix" : "Stem") + '</span>' + esc(t.label) + '</span>' +
             '<span class="ms"><button class="m" data-mute="' + i + '" aria-pressed="false" aria-label="Mute ' + esc(t.label) + '">M</button><button class="s" data-solo="' + i + '" aria-pressed="false" aria-label="Solo ' + esc(t.label) + '">S</button><button class="p" data-part="' + i + '" aria-pressed="false" aria-label="My part: ' + esc(t.label) + '" title="This is my part">★</button></span>' +
             '<input type="range" min="0" max="1" step="0.01" value="1" data-vol="' + i + '" aria-label="Volume ' + esc(t.label) + '">' +
-            (isAdmin() ? '<button class="linkbtn dl" data-dl="' + esc(t.id) + '">Download</button>' : '<span class="dl" aria-hidden="true"></span>') + '</div>';
+            (isAdmin() && !t.mobile_mix ? '<button class="linkbtn dl" data-dl="' + esc(t.id) + '">Download</button>' : '<span class="dl" aria-hidden="true"></span>') + '</div>';
         }).join("") + '</div></div>' +
         (mixTracks.length > 1 ? '<p class="order-note">' + (hasMyOrder(id) ? 'You’re using your own track order. <button type="button" class="linkbtn" id="reset-order">Use the band order</button>' : 'Hold a track and drag it to put them in your own order.') + '</p>' : '');
       if (stems.length && guides.length) h += '<p class="muted" style="font-size:14px">The guide mix starts muted so it doesn’t double the stems. Unmute it to hear the full recording.</p>';
-      var hiddenSplit = audioTracks(id).length - mixTracks.length;
-      if (hiddenSplit > 0) h += '<p class="muted" style="font-size:14px">Performance mode: ' + hiddenSplit + ' duplicate L/R split files are skipped because the matching stereo stems are already loaded. This reduces buffering without deleting any files.</p>';
+      if (IOS && s.mobile_mix_path) {
+        h += '<p class="muted" style="font-size:14px">Mobile reliability mode: your phone plays one pre-mixed rehearsal file instead of many simultaneous stems, preventing iPhone skipping and cut-outs. The full stem mixer is still available on desktop.</p>';
+      } else {
+        var hiddenSplit = audioTracks(id).length - mixTracks.length;
+        if (hiddenSplit > 0) h += '<p class="muted" style="font-size:14px">Performance mode: ' + hiddenSplit + ' duplicate L/R split files are skipped because the matching stereo stems are already loaded. This reduces buffering without deleting any files.</p>';
+      }
     }
     h += '</div>';
     var myNote = S.practice[s.id] && S.practice[s.id].note;
@@ -499,7 +503,7 @@
     var st = orderStore(); if (ids) st[id] = ids; else delete st[id];
     try { localStorage.setItem(ORDER_KEY, JSON.stringify(st)); } catch (e) {}
   }
-  function playbackTracks(id) {
+  function dedupPlaybackTracks(id) {
     var band = audioTracks(id), full = {};
     var base = function (label) { return String(label || "").replace(/\.(L|R)$/i, "").trim().toLowerCase(); };
     band.forEach(function (t) { if (!/\.(L|R)$/i.test(t.label || "")) full[base(t.label)] = true; });
@@ -507,6 +511,24 @@
       var side = /\.(L|R)$/i.test(t.label || "");
       return !side || !full[base(t.label)];
     });
+  }
+  function playbackTracks(id) {
+    var s = S.songs.find(function (x) { return x.id === id; });
+    if (IOS && s && s.mobile_mix_path) {
+      return [{
+        id: "mobile-mix:" + id,
+        song_id: id,
+        kind: "mobile_mix",
+        label: "Mobile rehearsal mix",
+        path: s.mobile_mix_path,
+        lite_path: s.mobile_mix_path,
+        size_bytes: s.mobile_mix_bytes || 0,
+        lite_bytes: s.mobile_mix_bytes || 0,
+        sort: -1,
+        mobile_mix: true
+      }];
+    }
+    return dedupPlaybackTracks(id);
   }
   function myOrder(id) {
     var band = playbackTracks(id), mine = orderStore()[id];
@@ -2092,7 +2114,7 @@
   // A light 128 kbps MP3 of every audio track (lite.js), so phones can stream a whole song's
   // stems at once and keep them in sync. Made on an admin's computer: new uploads are
   // converted from the file as it goes up; older tracks from the Phone copies card.
-  var liteQueue = [], liteBusy = 0, LITEJOB = null, LITE_PAR = 3;
+  var liteQueue = [], liteBusy = 0, LITEJOB = null, MIXJOB = null, LITE_PAR = 3;
   function isAudio(t) { return t.kind === "stem" || t.kind === "guide"; }
   function litePath(t) { return "lite/" + t.path.replace(/\.[a-z0-9]+$/i, "") + ".mp3"; }
   async function saveLite(t, blob) {
@@ -2131,6 +2153,26 @@
     if (!isAudio(t) || !window.MTLite || !MTLite.supported() || !finePointer()) return;
     liteConvert(t, file).catch(function () {});
   }
+  async function saveMobileMix(s, blob) {
+    var path = "mobile-mixes/" + s.id + ".mp3";
+    var up = await sb.storage.from(BUCKET).upload(path, blob, { contentType: "audio/mpeg", upsert: true });
+    if (up.error) throw up.error;
+    var r = await sb.from("songs").update({ mobile_mix_path: path, mobile_mix_bytes: blob.size, updated_at: new Date().toISOString() }).eq("id", s.id);
+    if (r.error) throw r.error;
+    s.mobile_mix_path = path; s.mobile_mix_bytes = blob.size;
+  }
+  async function makeMobileMix(s, onProgress) {
+    var ts = dedupPlaybackTracks(s.id);
+    if (ts.length <= 1) return;
+    if (!ts.every(function (t) { return t.lite_path; })) throw new Error("Phone copies are not complete for " + s.title);
+    var paths = ts.map(function (t) { return t.lite_path; });
+    var u = await signedUrls(paths);
+    if (u.error) throw u.error;
+    var items = ts.map(function (t) { return { url: u.data[t.lite_path], label: t.label }; });
+    var blob = await MTLite.mixUrls(items, onProgress);
+    await saveMobileMix(s, blob);
+  }
+
   function liteAdmin() {
     var box = document.getElementById("lite-admin"); if (!box) return;
     var audio = S.tracks.filter(isAudio), missing = audio.filter(function (t) { return !t.lite_path; });
@@ -2144,6 +2186,21 @@
     else if (missing.length || LITEJOB) h += '<p class="muted" style="margin:0;font-size:14px">Making the other ' + missing.length + ' downloads ' + mb(gb) + ' and converts it here. Do it on a computer with good Wi-Fi and keep this tab open. If it stops, press the button again and it carries on where it left off. New uploads get a phone copy automatically.</p>' +
       '<div class="tp-row"><button class="btn primary" id="lite-go"' + (LITEJOB ? ' disabled' : '') + '>' + (LITEJOB ? 'Making phone copies…' : 'Make the missing phone copies') + '</button><span class="muted" id="lite-prog">' + (LITEJOB ? esc(LITEJOB.msg) : '') + '</span></div>';
     else h += '<p class="muted" style="margin:0;font-size:14px">All done. New uploads get a phone copy automatically.</p>';
+    var mixEligible = S.songs.filter(function (s) {
+      var ts = dedupPlaybackTracks(s.id);
+      return ts.length > 1 && ts.every(function (t) { return t.lite_path; });
+    });
+    var mixMissing = mixEligible.filter(function (s) { return !s.mobile_mix_path; });
+    h += '<hr style="margin:18px 0;border:0;border-top:1px solid var(--line)">' +
+      '<p style="margin:0"><b>' + (mixEligible.length - mixMissing.length) + ' of ' + mixEligible.length + '</b> multi-track songs have a single mobile rehearsal mix.</p>' +
+      '<p class="muted" style="margin:0;font-size:14px">On iPhone/iPad, these songs play as one lightweight stereo file instead of many separate streams. This avoids the scratched-CD sound, drift and cut-outs. Desktop keeps the full stem mixer.</p>';
+    if (!window.MTLite || !MTLite.supported() || !finePointer()) {
+      h += '<p class="muted" style="margin:0;font-size:14px">Open this admin page on a computer to build the mobile rehearsal mixes.</p>';
+    } else if (mixMissing.length || MIXJOB) {
+      h += '<div class="tp-row"><button class="btn primary" id="mix-go"' + (MIXJOB ? ' disabled' : '') + '>' + (MIXJOB ? 'Building mobile mixes…' : 'Build missing mobile mixes') + '</button><span class="muted" id="mix-prog">' + (MIXJOB ? esc(MIXJOB.msg) : '') + '</span></div>';
+    } else {
+      h += '<p class="muted" style="margin:0;font-size:14px">All multi-track songs are ready for single-stream mobile playback.</p>';
+    }
     box.innerHTML = h;
     var go = document.getElementById("lite-go");
     if (go) go.onclick = function () {
@@ -2164,6 +2221,32 @@
         return liteConvert(t, null, function (p) { prog[t.id] = name + " " + Math.round(p * 100) + "%"; show(); })
           .then(function () { ok++; }, function () { fail++; }).then(function () { delete prog[t.id]; show(); });
       })).then(function () { LITEJOB = null; liteAdmin(); });
+    };
+
+    var mg = document.getElementById("mix-go");
+    if (mg) mg.onclick = async function () {
+      var list = mixMissing.slice(), ok = 0, fail = 0;
+      MIXJOB = { msg: "Starting…" }; liteAdmin();
+      for (var i = 0; i < list.length; i++) {
+        var s = list[i];
+        try {
+          MIXJOB.msg = "Building " + s.title + " · " + (i + 1) + " of " + list.length;
+          var pr = document.getElementById("mix-prog"); if (pr) pr.textContent = MIXJOB.msg;
+          await makeMobileMix(s, function (p) {
+            var detail = p.stage === "mix" ? ("mixing " + p.done + "/" + p.total + (p.label ? " · " + p.label : "")) :
+              ("encoding" + (p.progress != null ? " " + Math.round(p.progress * 100) + "%" : ""));
+            MIXJOB.msg = s.title + " · " + detail + " · " + (i + 1) + " of " + list.length;
+            var el = document.getElementById("mix-prog"); if (el) el.textContent = MIXJOB.msg;
+          });
+          ok++;
+        } catch (e) {
+          fail++;
+          if (window.console) console.warn("Mobile mix failed for " + s.title, e);
+        }
+      }
+      var doneMsg = ok + " mobile mixes built" + (fail ? " · " + fail + " failed" : "");
+      MIXJOB = null; liteAdmin();
+      var end = document.getElementById("mix-prog"); if (end) end.textContent = doneMsg;
     };
   }
 
