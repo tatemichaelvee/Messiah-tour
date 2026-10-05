@@ -66,9 +66,13 @@
   // the night as a list of timed items, in minutes from midnight (or from 0 when the start isn't set)
   function night(R, day) {
     var t = toMin(day.start) || 0, items = [];
+    (day.before || []).forEach(function (b) {
+      items.push({ kind: "talk", label: b.label, from: t, len: b.min * 60, color: "#5E6B72" });
+      t += b.min;
+    });
     if (day.opener) {
       var om = day.opener.min;
-      items.push({ kind: "opener", label: "Opening act: " + day.opener.name + (day.opener.confirm ? " (to confirm)" : ""), from: t, len: om ? om * 60 : 0, color: "#8A8386", noLen: !om });
+      items.push({ kind: "opener", label: "Opening act: " + day.opener.name + (day.opener.range ? " (" + day.opener.range + ")" : "") + (day.opener.confirm ? " (to confirm)" : ""), from: t, len: om ? om * 60 : 0, color: "#8A8386", noLen: !om });
       t += om || 0;
     }
     R.sets.forEach(function (x) {

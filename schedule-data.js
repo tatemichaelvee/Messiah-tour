@@ -3,17 +3,17 @@
    Posters live in the portal's image storage (site-assets/tour/<city>.jpg); admins upload them on each show card.
    Times are local to each city, 24-hour "HH:MM". Leave a time as null when it isn't confirmed yet. */
 window.MT_SCHEDULE = {
-  updated: "2026-10-04",
+  updated: "2026-10-05",
   tagline: "Tinenge Tichingoti Messiah",
   tickets: "Kids $15 · General early bird $70 · VIP early bird $90 · on Eventbrite",
 
   // Seconds between songs inside a set, and between sets (the band stays on stage).
   songGap: 30,
   setGap: 30,
-  // Longer gaps after a particular set, by set number. Set 5 is Eleana's opening set:
-  // her band leaves and Minister Michael's band comes on.
-  setGapAfter: { "5": 300 },
-  changeoverLabel: { "5": "Changeover: Eleana's band off, Minister Michael's band on" },
+  // Longer gaps after a particular set, by set number, e.g. { "5": 300 } for a 5-minute changeover.
+  // None for now: the same band plays every set, Eleana's included.
+  setGapAfter: {},
+  changeoverLabel: {},
 
   // Planned length of each setlist song: [seconds, how it was timed, note].
   // "stems" = measured from the stems (silence trimmed), "guide"/"reference" = from that track,
@@ -82,8 +82,11 @@ window.MT_SCHEDULE = {
       venue: "Glory Lutheran Church", address: "22577 AB-16, Sherwood Park, AB T8A 4T7",
       poster: "tour/edmonton.jpg",
       soundcheck: ["12:00", "14:00"], call: "18:00", callCheck: true,
-      doors: "17:30", start: "18:30", finishBy: "24:00",
-      opener: { name: "Victor", min: 45, confirm: true }
+      doors: "17:30", start: "18:00", finishBy: "24:00",
+      // Talks before the music, in order: {label, min}.
+      before: [{ label: "MC", min: 25 }],
+      // Planned at the long end of 25-30 minutes.
+      opener: { name: "Victor", min: 30, range: "25–30 min" }
     },
     {
       id: "toronto", kind: "show", day: "2026-10-10", city: "Toronto", theme: "toronto",
@@ -97,7 +100,7 @@ window.MT_SCHEDULE = {
       venue: "Peace House", address: "12484 82 Ave, Surrey, BC V3W 3E9",
       poster: "tour/vancouver.jpg",
       soundcheck: null, call: null, doors: "17:30", start: null, finishBy: null,
-      opener: { name: "Lloyd Tevedzai", min: null, confirm: true }
+      opener: null
     }
   ]
 };
