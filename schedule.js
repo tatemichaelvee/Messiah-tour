@@ -84,6 +84,15 @@
   }
 
   // ---------- pieces ----------
+  // A day's fixed timeline ({at, to} in "HH:MM", or {when} as free text) and notes.
+  function timeline(d) {
+    var tl = (d.timeline || []).map(function (e) {
+      var t = e.at ? (e.to ? span(toMin(e.at), toMin(e.to)) : hour(toMin(e.at))) : (e.when || "");
+      return '<li><span class="t">' + esc(t) + '</span><span class="what">' + esc(e.label) + (e.sub ? '<small>' + esc(e.sub) + '</small>' : '') + '</span></li>';
+    }).join("");
+    var notes = (d.notes || []).map(function (n) { return '<li>' + esc(n) + '</li>'; }).join("");
+    return (tl ? '<ol class="sc-tl">' + tl + '</ol>' : '') + (notes ? '<ul class="sc-notes">' + notes + '</ul>' : '');
+  }
   function weekStrip(R) {
     var today = todayIso(), nextId = null;
     R.D.days.some(function (d) { if (d.day >= today) { nextId = d.id; return true; } return false; });
@@ -99,6 +108,14 @@
   }
 
   function rehearsalCard(R, d) {
+    if (d.timeline) {
+      var q = dayParts(d.day);
+      return '<article class="sc-reh" id="sc-' + esc(d.id) + '">' +
+        '<header><div class="sc-reh-date"><b>' + q.wdl + ' ' + q.dd + ' ' + q.mon + '</b><span>' + esc(d.who) + '</span></div>' +
+        '<div class="sc-reh-hours">' + span(toMin(d.start), toMin(d.end)) + '</div></header>' +
+        timeline(d) + (d.note ? '<p class="sc-note">' + esc(d.note) + '</p>' : '') +
+        '<p class="sc-where">' + esc(d.venue) + ', ' + esc(d.city) + '</p></article>';
+    }
     var booked = (toMin(d.end) - toMin(d.start)) * 60;
     var blocks = d.plan.map(function (b) {
       if (b.set != null) { var x = R.sets.filter(function (y) { return y.st.no === b.set; })[0]; return x ? { label: x.name, sub: "Work through the set", sec: 2 * x.music, color: x.color } : null; }
@@ -170,6 +187,7 @@
       '<p class="sc-venue">' + esc(d.venue) + '</p>' +
       '<p class="sc-addr">' + esc(d.address) + ' <a href="' + map + '" target="_blank" rel="noopener">Open in Maps</a></p></header>' +
       '<dl class="sc-facts">' + facts.map(function (f) { return '<div><dt>' + f[0] + '</dt><dd>' + f[1] + '</dd></div>'; }).join("") + '</dl>' +
+      (d.timeline || d.notes ? '<div class="sc-dayplan"><h3>Day plan</h3>' + timeline(d) + '</div>' : '') +
       (N.known ? ribbon(N, d) : '<p class="sc-margin">Start time not confirmed yet, so the run of show below counts from the first act. The music runs about ' + hm(R.show) + '.</p>') +
       '<details class="sc-ros"' + (N.known ? ' open' : '') + '><summary>Run of show</summary><ol>' + rows + '</ol></details>' +
       '</div></article>';

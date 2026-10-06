@@ -3,7 +3,7 @@
    Posters live in the portal's image storage (site-assets/tour/<city>.jpg); admins upload them on each show card.
    Times are local to each city, 24-hour "HH:MM". Leave a time as null when it isn't confirmed yet. */
 window.MT_SCHEDULE = {
-  updated: "2026-10-05",
+  updated: "2026-10-06",
   tagline: "Tinenge Tichingoti Messiah",
   tickets: "Kids $15 · General early bird $70 · VIP early bird $90 · on Eventbrite",
 
@@ -56,33 +56,55 @@ window.MT_SCHEDULE = {
   },
   estimateSeconds: 390,
 
-  // Rehearsal plan blocks: {set: n} = working rehearsal of that set (twice its music time),
-  // {run: true} = full run of the show with no stops, {label, min} = fixed block.
+  // Days in order. Rehearsal days with a timeline show that list of times; without one they show
+  // a plan: {set: n} = working rehearsal of that set (twice its music time), {run: true} = full run,
+  // {label, min} = fixed block. Show days can also have a timeline (the day plan) and notes.
+  // Timeline entries: {at: "HH:MM", to: "HH:MM"} for set times, or {when: "text"} for rough ones.
   days: [
     {
       id: "rehearsal-1", kind: "rehearsal", day: "2026-10-07",
-      title: "Rehearsal day 1", who: "Band and BVs",
+      title: "Rehearsal day 1", who: "Band from 12 pm, BVs from 6 pm",
       venue: "Glory Lutheran Church", city: "Sherwood Park",
       address: "22577 AB-16, Sherwood Park, AB T8A 4T7",
-      start: "10:00", end: "18:00",
-      plan: [{ set: 5 }, { set: 1 }, { set: 4 }, { label: "Breaks", min: 40 }],
-      note: "A full day. The time left over also has to cover lunch, so start on time."
+      start: "12:00", end: "22:00",
+      timeline: [
+        { at: "12:00", to: "18:00", label: "Band" },
+        { at: "18:00", label: "BVs join", sub: "Quick break" },
+        { at: "22:00", label: "Finish" }
+      ],
+      notes: ["Breakfast for the band at Munya's before rehearsal."]
     },
     {
       id: "rehearsal-2", kind: "rehearsal", day: "2026-10-08",
-      title: "Rehearsal day 2", who: "Band and BVs",
+      title: "Rehearsal day 2", who: "Band and artists",
       venue: "Glory Lutheran Church", city: "Sherwood Park",
       address: "22577 AB-16, Sherwood Park, AB T8A 4T7",
-      start: "10:00", end: "18:00",
-      plan: [{ set: 2 }, { set: 3 }, { run: true }, { label: "Breaks", min: 20 }],
-      note: "Use the spare time for anything day 1 didn't finish, before the full run."
+      start: "10:00", end: "22:00",
+      timeline: [
+        { at: "10:00", to: "15:00", label: "Minister Michael", sub: "Quick break at 1 pm" },
+        { at: "15:00", label: "Lunch break" },
+        { at: "16:00", label: "Mrs Vimbai and Eleana" },
+        { at: "19:00", label: "Quick break" },
+        { at: "21:00", to: "22:00", label: "Finish" }
+      ],
+      notes: [
+        "Band members from outside Edmonton make their own breakfast at the Airbnb.",
+        "The band has its own vehicle to and from rehearsals. Any band member can drive.",
+        "Light snacks during sessions."
+      ]
     },
     {
       id: "edmonton", kind: "show", day: "2026-10-09", city: "Edmonton", theme: "edmonton",
       venue: "Glory Lutheran Church", address: "22577 AB-16, Sherwood Park, AB T8A 4T7",
       poster: "tour/edmonton.jpg",
-      soundcheck: ["12:00", "14:00"], call: "18:00", callCheck: true,
+      soundcheck: null, call: "18:00", callCheck: true,
       doors: "17:30", start: "18:00", finishBy: "24:00",
+      timeline: [
+        { at: "09:00", label: "Sound engineer setup" },
+        { at: "12:00", label: "Musicians soundcheck" },
+        { at: "13:30", label: "BVs soundcheck" },
+        { at: "14:00", label: "Artists soundcheck" }
+      ],
       // Talks before the music, in order: {label, min}.
       before: [{ label: "MC", min: 25 }],
       // Planned at the long end of 25-30 minutes.
@@ -92,14 +114,31 @@ window.MT_SCHEDULE = {
       id: "toronto", kind: "show", day: "2026-10-10", city: "Toronto", theme: "toronto",
       venue: "Rexdale Alliance Church", address: "2459 Islington Ave, Etobicoke, ON M9W 3X9",
       poster: "tour/toronto.jpg",
-      soundcheck: null, call: null, doors: "17:30", start: null, finishBy: null,
+      soundcheck: ["14:00", "16:00"], call: "18:00", callCheck: true,
+      doors: "17:30", start: "18:00", finishBy: "24:00",
+      timeline: [
+        { when: "6–7 am", label: "Leave Edmonton" },
+        { when: "12–1 pm", label: "Arrive in Toronto", sub: "Go straight to the venue. There won't be time to stop." },
+        { at: "14:00", to: "16:00", label: "Soundcheck and lunch", sub: "Eat during soundcheck, otherwise eat after" }
+      ],
+      notes: ["Show: same length and program as Edmonton.", "We eat after the gig."],
+      before: [{ label: "MC", min: 25 }],
       opener: { name: "Mary", min: null }
     },
     {
       id: "vancouver", kind: "show", day: "2026-10-11", city: "Vancouver", theme: "vancouver",
       venue: "Peace House", address: "12484 82 Ave, Surrey, BC V3W 3E9",
       poster: "tour/vancouver.jpg",
-      soundcheck: null, call: null, doors: "17:30", start: null, finishBy: null,
+      soundcheck: null, call: "18:00", callCheck: true,
+      doors: "17:30", start: "18:00", finishBy: "24:00",
+      timeline: [
+        { when: "6–8 am", label: "Leave Toronto" },
+        { when: "11 am–12 pm", label: "Arrive in Vancouver", sub: "Go straight to the Airbnb to eat" },
+        { when: "Then", label: "Soundcheck" },
+        { when: "Then", label: "Back to the Airbnb to refresh, then the gig" }
+      ],
+      notes: ["Show: same program as Edmonton, but no opening act.", "We eat after the gig."],
+      before: [{ label: "MC", min: 25 }],
       opener: null
     }
   ]
