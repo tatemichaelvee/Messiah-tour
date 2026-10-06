@@ -72,7 +72,10 @@ window.MT_SCHEDULE = {
         { at: "18:00", label: "BVs join", sub: "Quick break" },
         { at: "22:00", label: "Finish" }
       ],
-      notes: ["Breakfast for the band at Munya's before rehearsal."]
+      notes: [
+        "Breakfast for the band at Munya's before rehearsal.",
+        "After rehearsal, band members from out of town go to the Airbnb to eat."
+      ]
     },
     {
       id: "rehearsal-2", kind: "rehearsal", day: "2026-10-08",
@@ -90,7 +93,8 @@ window.MT_SCHEDULE = {
       notes: [
         "Band members from outside Edmonton make their own breakfast at the Airbnb.",
         "The band has its own vehicle to and from rehearsals. Any band member can drive.",
-        "Light snacks during sessions."
+        "Light snacks during sessions.",
+        "After rehearsal, band members from out of town go to the Airbnb to eat."
       ]
     },
     {

@@ -162,3 +162,14 @@
 .sc-poster img[hidden],.sc-poster-alt[hidden]{display:none}
 .sc-poster{min-width:0;overflow:hidden;overflow:clip}
 @media (min-width:900px){.sc-poster.empty{display:block}.sc-poster-alt{position:sticky;top:0;height:auto;min-height:520px}}
+
+/* a day's fixed timeline and notes (rehearsal days, show-day plan) */
+.sc-tl{list-style:none;margin:0;padding:0;display:grid;font-variant-numeric:tabular-nums}
+.sc-tl li{display:grid;grid-template-columns:104px minmax(0,1fr);gap:12px;align-items:baseline;padding:9px 0;border-bottom:1px solid var(--line)}
+.sc-tl li:last-child{border-bottom:0}
+.sc-tl .t{font-weight:700;white-space:nowrap}
+.sc-tl .what{font-weight:700}
+.sc-tl .what small{display:block;font-size:13px;font-weight:400;color:var(--muted)}
+.sc-notes{margin:0;padding:10px 14px 10px 30px;border-radius:10px;background:var(--sunk);font-size:14px;display:grid;gap:4px}
+.sc-dayplan{display:grid;gap:10px}
+.sc-dayplan h3{margin:0}
