@@ -3,7 +3,7 @@
    Posters live in the portal's image storage (site-assets/tour/<city>.jpg); admins upload them on each show card.
    Times are local to each city, 24-hour "HH:MM". Leave a time as null when it isn't confirmed yet. */
 window.MT_SCHEDULE = {
-  updated: "2026-10-06",
+  updated: "2026-10-07",
   tagline: "Tinenge Tichingoti Messiah",
   tickets: "Kids $15 · General early bird $70 · VIP early bird $90 · on Eventbrite",
 
@@ -100,8 +100,8 @@ window.MT_SCHEDULE = {
     },
     {
       id: "edmonton", kind: "show", day: "2026-10-09", city: "Edmonton", theme: "edmonton",
-      venue: "Glory Lutheran Church", address: "22577 AB-16, Sherwood Park, AB T8A 4T7",
-      poster: "tour/edmonton.jpg",
+      venue: "Living Waters AOG Sanctuary (Shiloh Temple)", address: "15830 118 Ave NW, Edmonton, AB T5V 1C4",
+      poster: "tour/edmonton-v2.jpg",
       soundcheck: null, call: "18:00", callCheck: true,
       doors: "17:30", start: "18:00", finishBy: "24:00",
       timeline: [
