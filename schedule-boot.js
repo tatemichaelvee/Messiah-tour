@@ -70,6 +70,10 @@
     var box = document.createElement("main");
     box.id = "page-main"; box.className = pg.cls || "";
     box.innerHTML = '<p class="loading">Loading…</p>';
+    var back = document.createElement("a");
+    back.className = "back"; back.href = "#/";
+    back.innerHTML = '<span class="arr" aria-hidden="true">←</span> All songs';
+    app.appendChild(back);
     app.appendChild(box);
     window.scrollTo(0, 0);
     load().then(function (d) {
