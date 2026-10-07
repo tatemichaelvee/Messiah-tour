@@ -79,7 +79,7 @@ window.MT_SCHEDULE = {
     },
     {
       id: "rehearsal-2", kind: "rehearsal", day: "2026-10-08",
-      title: "Rehearsal day 2", who: "Band and artists",
+      title: "Rehearsal day 2", who: "Band and BVs, 10 am–10 pm",
       venue: "Glory Lutheran Church", city: "Sherwood Park",
       address: "22577 AB-16, Sherwood Park, AB T8A 4T7",
       start: "10:00", end: "22:00",
@@ -93,7 +93,6 @@ window.MT_SCHEDULE = {
       notes: [
         "Band members from outside Edmonton make their own breakfast at the Airbnb.",
         "The band has its own vehicle to and from rehearsals. Any band member can drive.",
-        "Light snacks during sessions.",
         "After rehearsal, band members from out of town go to the Airbnb to eat."
       ]
     },
@@ -121,11 +120,12 @@ window.MT_SCHEDULE = {
       soundcheck: ["14:00", "16:00"], call: "18:00", callCheck: true,
       doors: "17:30", start: "18:00", finishBy: "24:00",
       timeline: [
-        { when: "6–7 am", label: "Leave Edmonton" },
+        { when: "4–5 am", label: "Be at Edmonton airport", sub: "Transport to the airport is provided for band and BVs" },
+        { when: "6–7 am", label: "Fly out of Edmonton" },
         { when: "12–1 pm", label: "Arrive in Toronto", sub: "Go straight to the venue. There won't be time to stop." },
         { at: "14:00", to: "16:00", label: "Soundcheck and lunch", sub: "Eat during soundcheck, otherwise eat after" }
       ],
-      notes: ["Show: same length and program as Edmonton.", "We eat after the gig."],
+      notes: ["Show: same length and program as Edmonton.", "We eat after the gig.", "Everyone stays at one Airbnb in Toronto."],
       before: [{ label: "MC", min: 25 }],
       opener: { name: "Mary", min: null }
     },
@@ -136,12 +136,12 @@ window.MT_SCHEDULE = {
       soundcheck: null, call: "18:00", callCheck: true,
       doors: "17:30", start: "18:00", finishBy: "24:00",
       timeline: [
-        { when: "6–8 am", label: "Leave Toronto" },
+        { when: "6–8 am", label: "Fly out of Toronto", sub: "Transport to the airport is provided for band and BVs" },
         { when: "11 am–12 pm", label: "Arrive in Vancouver", sub: "Go straight to the Airbnb to eat" },
         { at: "14:00", label: "Soundcheck", sub: "Artists take about 1.5–2 hours" },
         { when: "Then", label: "Back to the Airbnb to refresh, then the gig" }
       ],
-      notes: ["Show: same program as Edmonton, but no opening act.", "We eat after the gig."],
+      notes: ["Show: same program as Edmonton, but no opening act.", "We eat after the gig.", "Everyone stays at one Airbnb in Vancouver."],
       before: [{ label: "MC", min: 25 }],
       opener: null
     }
