@@ -107,7 +107,7 @@ window.MT_SCHEDULE = {
         { at: "09:00", label: "Sound engineer setup" },
         { at: "12:00", label: "Musicians soundcheck" },
         { at: "13:30", label: "BVs soundcheck" },
-        { at: "14:00", label: "Artists soundcheck" }
+        { at: "14:00", label: "Artists soundcheck", sub: "About 1.5–2 hours" }
       ],
       // Talks before the music, in order: {label, min}.
       before: [{ label: "MC", min: 25 }],
@@ -138,7 +138,7 @@ window.MT_SCHEDULE = {
       timeline: [
         { when: "6–8 am", label: "Leave Toronto" },
         { when: "11 am–12 pm", label: "Arrive in Vancouver", sub: "Go straight to the Airbnb to eat" },
-        { when: "Then", label: "Soundcheck" },
+        { at: "14:00", label: "Soundcheck", sub: "Artists take about 1.5–2 hours" },
         { when: "Then", label: "Back to the Airbnb to refresh, then the gig" }
       ],
       notes: ["Show: same program as Edmonton, but no opening act.", "We eat after the gig."],
