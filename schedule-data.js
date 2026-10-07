@@ -73,6 +73,7 @@ window.MT_SCHEDULE = {
         { at: "22:00", label: "Finish" }
       ],
       notes: [
+        "Minister Michael arrives at 2 pm.",
         "Breakfast for the band at Munya's before rehearsal.",
         "After rehearsal, band members from out of town go to the Airbnb to eat."
       ]
@@ -91,6 +92,7 @@ window.MT_SCHEDULE = {
         { at: "21:00", to: "22:00", label: "Finish" }
       ],
       notes: [
+        "Eleana arrives in the morning.",
         "Band members from outside Edmonton make their own breakfast at the Airbnb.",
         "The band has its own vehicle to and from rehearsals. Any band member can drive.",
         "After rehearsal, band members from out of town go to the Airbnb to eat."
